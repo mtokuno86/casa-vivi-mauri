@@ -16,14 +16,14 @@ export const firebaseConfig = {
 
 // --- Google OAuth (Calendar + Drive, para calendário e galeria de fotos) ---
 // Client ID do tipo "Web application" criado no Google Cloud Console.
-export const googleClientId = "";
+export const googleClientId = "1094300436813-4esdk2ubn2hq0vjpb1gflflgh5li8il6.apps.googleusercontent.com";
 
 // Chave de API do Google Cloud (para chamadas de leitura simples).
-export const googleApiKey = "";
+export const googleApiKey = "AIzaSyD3-D9eTyo69o1H3FQcVTnzrfnb3BRsFkw";
 
 // ID da pasta do Google Drive com as fotos do dashboard.
 // Pegue da URL da pasta: drive.google.com/drive/folders/ESSE_ID_AQUI
-export const photosDriveFolderId = "";
+export const photosDriveFolderId = "148ch_pbMKjeIJjPbrL7OiqDSMcZ5_Uvr";
 
 // Intervalo de troca de foto no dashboard (ms)
 export const photoRotationMs = 12000;
