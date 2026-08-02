@@ -19,7 +19,7 @@ export const firebaseConfig = {
 export const googleClientId = "1094300436813-4esdk2ubn2hq0vjpb1gflflgh5li8il6.apps.googleusercontent.com";
 
 // Chave de API do Google Cloud (para chamadas de leitura simples).
-export const googleApiKey = AIzaSyD3-D9eTyo69o1H3FQcVTnzrfnb3BRsFkw;
+export const googleApiKey = "AIzaSyD3-D9eTyo69o1H3FQcVTnzrfnb3BRsFkw";
 
 // ID da pasta do Google Drive com as fotos do dashboard.
 // Pegue da URL da pasta: drive.google.com/drive/folders/ESSE_ID_AQUI
