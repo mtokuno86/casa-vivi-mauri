@@ -1,0 +1,14 @@
+{
+  "name": "Casa Vivi & Mauri",
+  "short_name": "Casa V&M",
+  "description": "Organização de casa: cardápio, compras, tarefas e calendário",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f1ea",
+  "theme_color": "#3a6351",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Casa Vivi &amp; Mauri</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3a6351">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <div class="brand">🏡 Casa Vivi &amp; Mauri</div>
+    <div class="header-actions">
+      <span id="syncStatus" class="sync-status" title="Status de sincronização">●</span>
+      <button id="googleSignInBtn" class="btn-google">Conectar Google</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="dashboard">🏠 Início</button>
+    <button class="tab-btn" data-tab="cardapio">🍽️ Cardápio</button>
+    <button class="tab-btn" data-tab="receitas">📖 Receitas</button>
+    <button class="tab-btn" data-tab="compras">🛒 Compras</button>
+    <button class="tab-btn" data-tab="tarefas">✅ Tarefas</button>
+    <button class="tab-btn" data-tab="calendario">📅 Calendário</button>
+  </nav>
+
+  <main id="views">
+
+    <section id="view-dashboard" class="view active">
+      <div class="dash-grid">
+        <div class="card dash-photos">
+          <h2>Galeria</h2>
+          <div id="photoGallery" class="photo-gallery">
+            <div class="photo-empty">Configure a pasta do Google Drive em <code>js/config.js</code> para ver as fotos aqui.</div>
+          </div>
+        </div>
+        <div class="card dash-today">
+          <h2>Hoje — <span id="todayDate"></span></h2>
+          <h3>Cardápio de hoje</h3>
+          <div id="todayMeals" class="today-meals"></div>
+          <h3>Tarefas de hoje</h3>
+          <ul id="todayTasks" class="today-tasks"></ul>
+          <h3>Compromissos de hoje</h3>
+          <ul id="todayEvents" class="today-events"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-cardapio" class="view">
+      <div class="section-header">
+        <h2>Cardápio semanal</h2>
+        <div class="week-nav">
+          <button id="prevWeekBtn">‹</button>
+          <span id="weekLabel"></span>
+          <button id="nextWeekBtn">›</button>
+        </div>
+      </div>
+      <p class="hint">Toque em uma refeição para escolher/trocar a receita. Arraste (ou use "Trocar") para intercambiar duas refeições já preenchidas.</p>
+      <div id="mealGrid" class="meal-grid"></div>
+    </section>
+
+    <section id="view-receitas" class="view">
+      <div class="section-header">
+        <h2>Receitas</h2>
+        <button id="addRecipeBtn" class="btn-primary">+ Nova receita</button>
+      </div>
+      <div id="recipeList" class="recipe-list"></div>
+    </section>
+
+    <section id="view-compras" class="view">
+      <div class="section-header">
+        <h2>Lista de compras</h2>
+        <button id="addShoppingItemBtn" class="btn-primary">+ Item avulso</button>
+      </div>
+      <p class="hint">Gerada automaticamente a partir do cardápio da semana selecionada, mais itens avulsos.</p>
+      <div id="shoppingList" class="shopping-list"></div>
+    </section>
+
+    <section id="view-tarefas" class="view">
+      <div class="section-header">
+        <h2>Tarefas &amp; rotina da casa</h2>
+        <button id="addTaskBtn" class="btn-primary">+ Nova tarefa</button>
+      </div>
+      <div id="taskList" class="task-list"></div>
+    </section>
+
+    <section id="view-calendario" class="view">
+      <div class="section-header">
+        <h2>Calendário</h2>
+        <button id="addEventBtn" class="btn-primary">+ Compromisso</button>
+      </div>
+      <p class="hint" id="calendarHint">Conecte sua conta Google para sincronizar com o Google Calendar.</p>
+      <ul id="eventList" class="event-list"></ul>
+    </section>
+
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+:root {
+  --green: #3a6351;
+  --green-light: #6ea08a;
+  --cream: #f4f1ea;
+  --ink: #2b2b28;
+  --accent: #d97b46;
+  --danger: #b3492f;
+  --card-bg: #ffffff;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  height: 100%;
+}
+
+#app { display: flex; flex-direction: column; min-height: 100vh; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--green);
+  color: white;
+  padding: 14px 18px;
+}
+
+.brand { font-size: 1.2rem; font-weight: 700; }
+
+.header-actions { display: flex; align-items: center; gap: 10px; }
+
+.sync-status { color: #9be29b; font-size: 0.9rem; }
+.sync-status.offline { color: #e2a99b; }
+
+.btn-google {
+  background: white;
+  color: var(--green);
+  border: none;
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.tabs {
+  display: flex;
+  overflow-x: auto;
+  background: var(--green-light);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.tab-btn {
+  flex: 1 0 auto;
+  background: transparent;
+  border: none;
+  color: white;
+  padding: 14px 16px;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.tab-btn.active {
+  opacity: 1;
+  background: rgba(255,255,255,0.18);
+  font-weight: 700;
+  border-bottom: 3px solid var(--accent);
+}
+
+main#views { flex: 1; padding: 16px; max-width: 1000px; margin: 0 auto; width: 100%; }
+
+.view { display: none; }
+.view.active { display: block; }
+
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 760px) {
+  .dash-grid { grid-template-columns: 1fr; }
+}
+
+.photo-gallery {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ddd6c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-gallery img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+
+.photo-gallery img.visible { opacity: 1; }
+
+.photo-empty { padding: 20px; text-align: center; color: #776; font-size: 0.9rem; }
+
+.today-meals { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.meal-pill {
+  background: var(--cream);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+ul.today-tasks, ul.today-events, ul.event-list { list-style: none; padding: 0; margin: 0 0 10px 0; }
+ul.today-tasks li, ul.today-events li, ul.event-list li {
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee7d8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.hint { color: #706b5c; font-size: 0.85rem; margin: 4px 0 14px; }
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 600;
+}
+
+.week-nav { display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.week-nav button {
+  background: var(--green);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  font-size: 1.1rem;
+}
+
+.meal-grid {
+  display: grid;
+  grid-template-columns: 90px repeat(7, 1fr);
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.meal-grid .head {
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 2px;
+  font-size: 0.8rem;
+  color: var(--green);
+}
+
+.meal-cell {
+  background: var(--card-bg);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 8px;
+  min-height: 64px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.meal-cell.empty { color: #a8a396; font-style: italic; }
+.meal-cell.selected-for-swap { border-color: var(--accent); background: #fff2e8; }
+.meal-cell .recipe-title { font-weight: 600; }
+
+.recipe-list, .shopping-list, .task-list { display: flex; flex-direction: column; gap: 10px; }
+
+.recipe-card, .task-row, .shopping-group {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+
+.recipe-card h3 { margin: 0 0 4px; }
+.recipe-card a { color: var(--green); }
+.recipe-card .ingredients { font-size: 0.85rem; color: #555; margin-top: 6px; }
+
+.task-row { display: flex; align-items: center; gap: 12px; }
+.task-row.done { opacity: 0.5; text-decoration: line-through; }
+.task-row .task-info { flex: 1; }
+.task-row .task-recur { font-size: 0.78rem; color: #776; }
+
+.shopping-group h4 { margin: 0 0 8px; color: var(--green); }
+.shopping-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.shopping-item.checked { opacity: 0.45; text-decoration: line-through; }
+
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px;
+}
+
+.modal {
+  background: white; border-radius: 14px; padding: 20px; width: 100%; max-width: 480px;
+  max-height: 88vh; overflow-y: auto;
+}
+
+.modal h3 { margin-top: 0; }
+.modal label { display: block; font-size: 0.85rem; font-weight: 600; margin: 10px 0 4px; }
+.modal input, .modal select, .modal textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem;
+}
+.modal textarea { min-height: 80px; }
+.modal .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.modal .btn-secondary {
+  background: #eee; border: none; border-radius: 10px; padding: 10px 16px; font-weight: 600;
+}
+.day-checks { display: flex; gap: 6px; flex-wrap: wrap; }
+.day-checks label { display: flex; align-items: center; gap: 4px; font-weight: 400; font-size: 0.8rem; background: var(--cream); padding: 4px 8px; border-radius: 8px; }
