@@ -30,3 +30,8 @@ export const photoRotationMs = 12000;
 
 // Nome de exibição da casa (só cosmético)
 export const householdName = "Casa Vivi & Mauri";
+
+export const googleCalendarIds = [
+  "primary"
+  // , "vivianehatano@gmail.com"
+];
