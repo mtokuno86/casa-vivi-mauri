@@ -6,12 +6,12 @@
 // Deixe tudo como está (campos vazios) para rodar em "modo local" (localStorage),
 // só nesse aparelho, sem sincronizar. Preencha para sincronizar de verdade.
 export const firebaseConfig = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
+  apiKey: "AIzaSyDfek3j-3Qtr5TG-OEj6tsqtgnuAHtad60",
+  authDomain: "casa-a-casa-504119.firebaseapp.com",
+  projectId: "casa-a-casa-504119",
+  storageBucket: "casa-a-casa-504119.firebasestorage.app",
+  messagingSenderId: "1094300436813",
+  appId: "1:1094300436813:web:db3be1938cb062c0600f04"
 };
 
 // --- Google OAuth (Calendar + Drive, para calendário e galeria de fotos) ---
