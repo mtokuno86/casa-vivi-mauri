@@ -1,11 +1,10 @@
-const CACHE_NAME = 'casa-vm-v1';
+const CACHE_NAME = 'casa-vm-v2';
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
   './js/app.js',
-  './js/config.js',
   './js/db.js',
   './js/store.js',
   './js/modal.js',
@@ -38,14 +37,16 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Network-first for Google/Firebase APIs, cache-first for app shell.
+// Network-first para Google/Firebase e para config.js (muda durante o setup e
+// não pode ficar preso em cache); cache-first para o resto do app shell.
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
   const isExternal = url.includes('googleapis.com') || url.includes('firebaseio.com') || url.includes('gstatic.com');
+  const isConfig = url.includes('/js/config.js');
 
-  if (isExternal) {
+  if (isExternal || isConfig) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+      fetch(event.request, { cache: 'no-store' }).catch(() => caches.match(event.request))
     );
     return;
   }
