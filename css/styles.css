@@ -247,3 +247,39 @@ ul.today-tasks li, ul.today-events li, ul.event-list li {
 }
 .day-checks { display: flex; gap: 6px; flex-wrap: wrap; }
 .day-checks label { display: flex; align-items: center; gap: 4px; font-weight: 400; font-size: 0.8rem; background: var(--cream); padding: 4px 8px; border-radius: 8px; }
+
+.stock-list { display: flex; flex-direction: column; gap: 8px; }
+.stock-row {
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 10px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stock-row.low { border-left: 4px solid var(--danger); }
+.stock-info { flex: 1; }
+.stock-name { font-weight: 600; }
+.stock-qty { font-size: 0.82rem; color: #776; }
+.low-tag {
+  background: var(--danger);
+  color: white;
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-left: 6px;
+  font-weight: 600;
+}
+.stock-actions { display: flex; align-items: center; gap: 6px; }
+.stepper {
+  background: var(--green);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  font-size: 1rem;
+}
+
+.task-category-group h3 { border-bottom: 2px solid var(--green-light); padding-bottom: 4px; }

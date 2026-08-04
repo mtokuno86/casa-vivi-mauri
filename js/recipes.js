@@ -1,10 +1,13 @@
 // ============================================================================
 // recipes.js — CRUD de receitas (título, link opcional, ingredientes, modo de
-// preparo). Ingredientes são cadastrados manualmente (mais confiável que
-// tentar importar automaticamente de qualquer site de receitas).
+// preparo, tempo de preparo/rendimento/dificuldade). Ingredientes podem ser
+// digitados manualmente ou pré-preenchidos por "Importar de link" (quando
+// a página da receita tiver dados estruturados — ver functions/index.js).
+// De qualquer forma, o usuário sempre revisa/edita antes de salvar.
 // ============================================================================
 import { createStore } from './store.js';
 import { openModal } from './modal.js';
+import { recipeImportFunctionUrl } from './config.js';
 
 export const recipesStore = createStore('recipes');
 
@@ -26,11 +29,42 @@ function openRecipeForm(existing) {
     title: existing ? 'Editar receita' : 'Nova receita',
     bodyHtml: `
       <form id="recipeForm">
+        ${recipeImportFunctionUrl ? `
+          <div style="background:var(--cream); border-radius:10px; padding:10px; margin-bottom:10px;">
+            <label style="margin-top:0;">Importar de um link (opcional)</label>
+            <div style="display:flex; gap:6px;">
+              <input type="url" id="importUrlInput" placeholder="Cole o link da receita">
+              <button type="button" id="importBtn" class="btn-secondary">Importar</button>
+            </div>
+            <div id="importStatus" class="hint" style="margin:4px 0 0;"></div>
+          </div>
+        ` : ''}
+
         <label>Título</label>
         <input type="text" name="title" required value="${existing?.title ? existing.title.replace(/"/g, '&quot;') : ''}">
 
         <label>Link (opcional)</label>
         <input type="url" name="url" placeholder="https://..." value="${existing?.url || ''}">
+
+        <div style="display:flex; gap:8px;">
+          <div style="flex:1;">
+            <label>Tempo de preparo</label>
+            <input type="text" name="prepTime" placeholder="Ex: 30 min" value="${existing?.prepTime || ''}">
+          </div>
+          <div style="flex:1;">
+            <label>Rendimento</label>
+            <input type="text" name="yieldInfo" placeholder="Ex: 4 porções" value="${existing?.yieldInfo || ''}">
+          </div>
+          <div style="flex:1;">
+            <label>Dificuldade</label>
+            <select name="difficulty">
+              <option value="" ${!existing?.difficulty ? 'selected' : ''}>—</option>
+              <option value="facil" ${existing?.difficulty === 'facil' ? 'selected' : ''}>Fácil</option>
+              <option value="media" ${existing?.difficulty === 'media' ? 'selected' : ''}>Média</option>
+              <option value="dificil" ${existing?.difficulty === 'dificil' ? 'selected' : ''}>Difícil</option>
+            </select>
+          </div>
+        </div>
 
         <label>Ingredientes</label>
         <div id="ingredientsWrap">${ingredients.map(ingredientRowHtml).join('')}</div>
@@ -58,6 +92,40 @@ function openRecipeForm(existing) {
       });
       modalEl.querySelector('#cancelBtn').addEventListener('click', close);
 
+      const importBtn = modalEl.querySelector('#importBtn');
+      if (importBtn) {
+        importBtn.addEventListener('click', async () => {
+          const urlInput = modalEl.querySelector('#importUrlInput');
+          const status = modalEl.querySelector('#importStatus');
+          const url = urlInput.value.trim();
+          if (!url) return;
+          status.textContent = 'Buscando dados da receita…';
+          importBtn.disabled = true;
+          try {
+            const resp = await fetch(`${recipeImportFunctionUrl}?url=${encodeURIComponent(url)}`);
+            const data = await resp.json();
+            if (!resp.ok) {
+              status.textContent = data.error || 'Não foi possível importar essa receita — cadastre manualmente.';
+              return;
+            }
+            if (data.title) modalEl.querySelector('[name="title"]').value = data.title;
+            modalEl.querySelector('[name="url"]').value = data.sourceUrl || url;
+            if (data.prepTime || data.totalTime) modalEl.querySelector('[name="prepTime"]').value = data.prepTime || data.totalTime;
+            if (data.yield) modalEl.querySelector('[name="yieldInfo"]').value = data.yield;
+            if (data.instructions) modalEl.querySelector('[name="instructions"]').value = data.instructions;
+            if (data.ingredients?.length) {
+              wrap.innerHTML = data.ingredients.map((i) => ingredientRowHtml(i)).join('');
+            }
+            status.textContent = 'Importado — revise os campos antes de salvar (a extração automática pode não ser 100% exata).';
+          } catch (e) {
+            console.error(e);
+            status.textContent = 'Erro ao importar. Cadastre manualmente.';
+          } finally {
+            importBtn.disabled = false;
+          }
+        });
+      }
+
       const delBtn = modalEl.querySelector('#deleteRecipeBtn');
       if (delBtn) {
         delBtn.addEventListener('click', async () => {
@@ -81,6 +149,9 @@ function openRecipeForm(existing) {
         const data = {
           title: fd.get('title').trim(),
           url: fd.get('url').trim(),
+          prepTime: fd.get('prepTime').trim(),
+          yieldInfo: fd.get('yieldInfo').trim(),
+          difficulty: fd.get('difficulty'),
           instructions: fd.get('instructions').trim(),
           ingredients
         };
@@ -96,19 +167,28 @@ function openRecipeForm(existing) {
   });
 }
 
+const DIFFICULTY_LABELS = { facil: 'Fácil', media: 'Média', dificil: 'Difícil' };
+
 function renderRecipeList(container) {
   recipesStore.subscribe((recipes) => {
     if (!recipes.length) {
       container.innerHTML = '<p class="hint">Nenhuma receita ainda. Toque em "+ Nova receita" para cadastrar.</p>';
       return;
     }
-    container.innerHTML = recipes.map((r) => `
+    container.innerHTML = recipes.map((r) => {
+      const metaParts = [];
+      if (r.prepTime) metaParts.push(`⏱️ ${r.prepTime}`);
+      if (r.yieldInfo) metaParts.push(`🍽️ ${r.yieldInfo}`);
+      if (r.difficulty) metaParts.push(`📊 ${DIFFICULTY_LABELS[r.difficulty] || r.difficulty}`);
+      return `
       <div class="recipe-card" data-id="${r.id}">
         <h3>${r.title}</h3>
+        ${metaParts.length ? `<div style="font-size:0.8rem; color:#776; margin-bottom:4px;">${metaParts.join(' · ')}</div>` : ''}
         ${r.url ? `<a href="${r.url}" target="_blank" rel="noopener">Ver receita original ↗</a>` : ''}
         <div class="ingredients">${(r.ingredients || []).map((i) => `${i.qty || ''} ${i.unit || ''} ${i.name}`).join(' · ')}</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     container.querySelectorAll('.recipe-card').forEach((card) => {
       card.addEventListener('click', () => {

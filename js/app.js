@@ -3,8 +3,10 @@
 // ============================================================================
 import { initDb, getMode } from './db.js';
 import { initAuth, signIn, onAuthChange } from './auth.js';
+import { initMembers } from './members.js';
 import { initRecipes } from './recipes.js';
 import { initMealPlanner } from './mealPlanner.js';
+import { initStock } from './stock.js';
 import { initShoppingList, refreshShoppingList } from './shoppingList.js';
 import { initTasks } from './tasks.js';
 import { initCalendar } from './calendar.js';
@@ -55,8 +57,10 @@ async function main() {
   initSyncStatusIndicator();
   initGoogleButton();
 
+  initMembers();
   initRecipes();
   initMealPlanner();
+  initStock();
   initShoppingList();
   initTasks();
   initCalendar();

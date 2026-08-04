@@ -16,6 +16,26 @@ let accessToken = null;
 let refreshTimer = null;
 const listeners = new Set();
 
+const TOKEN_STORAGE_KEY = 'casa-vm:googleToken';
+
+function saveTokenToStorage(token, expiresAtMs) {
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ token, expiresAtMs }));
+  } catch (e) { /* ignora se localStorage não disponível */ }
+}
+
+function loadTokenFromStorage() {
+  try {
+    const raw = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data.token || !data.expiresAtMs) return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
 function notify() {
   listeners.forEach((cb) => cb(signedIn));
 }
@@ -71,6 +91,16 @@ function scheduleSilentRefresh(expiresInSec) {
   }, refreshInMs);
 }
 
+function applyToken(token, expiresInSec) {
+  accessToken = token;
+  window.gapi.client.setToken({ access_token: accessToken });
+  signedIn = true;
+  const expiresAtMs = Date.now() + (expiresInSec || 3300) * 1000;
+  saveTokenToStorage(token, expiresAtMs);
+  scheduleSilentRefresh(expiresInSec || 3300);
+  notify();
+}
+
 export async function initAuth() {
   if (!isConfigured()) {
     console.warn('Google Client ID / API Key não configurados em js/config.js — login Google desativado.');
@@ -90,15 +120,23 @@ export async function initAuth() {
         console.error('Erro no login Google:', resp);
         return;
       }
-      accessToken = resp.access_token;
-      window.gapi.client.setToken({ access_token: accessToken });
-      signedIn = true;
-      scheduleSilentRefresh(resp.expires_in || 3300);
-      notify();
+      applyToken(resp.access_token, resp.expires_in);
     }
   });
 
-  // Tenta reconectar silenciosamente (sem popup) se já houve consentimento antes.
+  // Se já temos um token salvo e ainda válido (por ~1h), usa direto — evita
+  // reabrir o popup de conexão a cada vez que o app é aberto.
+  const cached = loadTokenFromStorage();
+  if (cached && cached.expiresAtMs > Date.now() + 60000) {
+    const remainingSec = Math.round((cached.expiresAtMs - Date.now()) / 1000);
+    applyToken(cached.token, remainingSec);
+    return;
+  }
+
+  // Sem token válido em cache: tenta reconectar silenciosamente (sem popup)
+  // se já houve consentimento antes. Em navegadores mobile/PWA isso nem
+  // sempre é 100% silencioso — é uma limitação do próprio Google Identity
+  // Services, não do app.
   tokenClient.requestAccessToken({ prompt: '' });
 }
 

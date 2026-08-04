@@ -7,6 +7,7 @@ import { recipesStore } from './recipes.js';
 import { getTodayTasks, toggleTodayTask, tasksStore } from './tasks.js';
 import { getTodayEvents } from './calendar.js';
 import { todayStr } from './recurrence.js';
+import { getMemberName, membersStore } from './members.js';
 
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
@@ -39,12 +40,15 @@ function renderTodayTasks() {
     el.innerHTML = '<li class="hint">Nada pendente hoje 🎉</li>';
     return;
   }
-  el.innerHTML = items.map(({ task, done }) => `
+  el.innerHTML = items.map(({ task, done }) => {
+    const assigneeName = getMemberName(task.assignee);
+    return `
     <li>
       <input type="checkbox" class="today-task-check" data-id="${task.id}" ${done ? 'checked' : ''}>
-      <span style="${done ? 'text-decoration:line-through; opacity:0.5;' : ''}">${task.title}</span>
+      <span style="${done ? 'text-decoration:line-through; opacity:0.5;' : ''}">${task.title}${assigneeName ? ' <span style="color:#999; font-size:0.8rem;">· ' + assigneeName + '</span>' : ''}</span>
     </li>
-  `).join('');
+  `;
+  }).join('');
   el.querySelectorAll('.today-task-check').forEach((cb) => {
     cb.addEventListener('change', (e) => toggleTodayTask(cb.dataset.id, e.target.checked));
   });
@@ -64,6 +68,7 @@ export function initDashboard() {
   mealPlanStore.subscribe(renderTodayMeals);
   recipesStore.subscribe(renderTodayMeals);
   tasksStore.subscribe(renderTodayTasks);
+  membersStore.subscribe(renderTodayTasks);
   refreshDashboard();
   // Tablet fica fixo na geladeira o dia todo — atualiza sozinho de tempos em tempos
   // (troca de dia à meia-noite, novos eventos do Google Calendar, etc.).

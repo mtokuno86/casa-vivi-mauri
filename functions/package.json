@@ -1,0 +1,12 @@
+{
+  "name": "casa-vm-functions",
+  "description": "Função auxiliar do app Casa Vivi & Mauri: importar dados de receita a partir de um link.",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^5.0.0"
+  },
+  "private": true
+}

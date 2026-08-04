@@ -18,6 +18,7 @@
     <div class="brand">🏡 Casa Vivi &amp; Mauri</div>
     <div class="header-actions">
       <span id="syncStatus" class="sync-status" title="Status de sincronização">●</span>
+      <button id="membersBtn" class="btn-google" title="Gerenciar membros da casa">👥 Membros</button>
       <button id="googleSignInBtn" class="btn-google">Conectar Google</button>
     </div>
   </header>
@@ -26,6 +27,7 @@
     <button class="tab-btn active" data-tab="dashboard">🏠 Início</button>
     <button class="tab-btn" data-tab="cardapio">🍽️ Cardápio</button>
     <button class="tab-btn" data-tab="receitas">📖 Receitas</button>
+    <button class="tab-btn" data-tab="estoque">📦 Estoque</button>
     <button class="tab-btn" data-tab="compras">🛒 Compras</button>
     <button class="tab-btn" data-tab="tarefas">✅ Tarefas</button>
     <button class="tab-btn" data-tab="calendario">📅 Calendário</button>
@@ -74,12 +76,31 @@
       <div id="recipeList" class="recipe-list"></div>
     </section>
 
+    <section id="view-estoque" class="view">
+      <div class="section-header">
+        <h2>Estoque da casa</h2>
+      </div>
+      <p class="hint">Itens abaixo da quantidade mínima entram sozinhos na lista de compras, na aba "Compras".</p>
+
+      <div class="section-header" style="margin-top:8px;">
+        <h3>Ingredientes</h3>
+        <button id="addPantryItemBtn" class="btn-primary">+ Ingrediente</button>
+      </div>
+      <div id="pantryStockList" class="stock-list"></div>
+
+      <div class="section-header" style="margin-top:20px;">
+        <h3>Itens da casa</h3>
+        <button id="addHouseItemBtn" class="btn-primary">+ Item</button>
+      </div>
+      <div id="houseStockList" class="stock-list"></div>
+    </section>
+
     <section id="view-compras" class="view">
       <div class="section-header">
         <h2>Lista de compras</h2>
-        <button id="addShoppingItemBtn" class="btn-primary">+ Item avulso</button>
+        <button id="addShoppingItemBtn" class="btn-primary">+ Item avulso / wishlist</button>
       </div>
-      <p class="hint">Gerada automaticamente a partir do cardápio da semana selecionada, mais itens avulsos.</p>
+      <p class="hint">Do cardápio da semana, itens básicos abaixo do mínimo no estoque, e itens avulsos/wishlist.</p>
       <div id="shoppingList" class="shopping-list"></div>
     </section>
 

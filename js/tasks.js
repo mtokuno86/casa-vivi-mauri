@@ -1,10 +1,11 @@
 // ============================================================================
-// tasks.js — tarefas/pendências avulsas + rotina da casa com repetição
-// automática (usa recurrence.js, o mesmo motor em celular e tablet).
+// tasks.js — tarefas avulsas + rotina da casa + outros, com repetição
+// automática (recurrence.js) e responsável (membro da casa).
 // ============================================================================
 import { createStore } from './store.js';
 import { openModal } from './modal.js';
 import { isDueOn, nextOccurrence, describeRecurrence, todayStr } from './recurrence.js';
+import { membersStore, memberOptionsHtml, getMemberName } from './members.js';
 
 export const tasksStore = createStore('tasks');
 
@@ -12,6 +13,13 @@ const DIAS = [
   { v: 1, l: 'Seg' }, { v: 2, l: 'Ter' }, { v: 3, l: 'Qua' }, { v: 4, l: 'Qui' },
   { v: 5, l: 'Sex' }, { v: 6, l: 'Sáb' }, { v: 0, l: 'Dom' }
 ];
+
+const CATEGORIES = [
+  { v: 'tarefa', l: 'Tarefa avulsa' },
+  { v: 'rotina', l: 'Rotina da casa' },
+  { v: 'outro', l: 'Outro' }
+];
+const CATEGORY_LABELS = Object.fromEntries(CATEGORIES.map((c) => [c.v, c.l]));
 
 function dayCheckboxesHtml(selected = []) {
   return DIAS.map((d) => `
@@ -21,6 +29,7 @@ function dayCheckboxesHtml(selected = []) {
 
 function openTaskForm(existing) {
   const rec = existing?.recurrence || { freq: 'none' };
+  const defaultCategory = existing?.category || (rec.freq === 'none' ? 'tarefa' : 'rotina');
 
   openModal({
     title: existing ? 'Editar tarefa' : 'Nova tarefa',
@@ -28,6 +37,14 @@ function openTaskForm(existing) {
       <form id="taskForm">
         <label>Título</label>
         <input type="text" name="title" required value="${existing?.title ? existing.title.replace(/"/g, '&quot;') : ''}">
+
+        <label>Categoria</label>
+        <select name="category">
+          ${CATEGORIES.map((c) => `<option value="${c.v}" ${defaultCategory === c.v ? 'selected' : ''}>${c.l}</option>`).join('')}
+        </select>
+
+        <label>Responsável</label>
+        <select name="assignee">${memberOptionsHtml(existing?.assignee)}</select>
 
         <label>Repetição</label>
         <select name="freq" id="freqSelect">
@@ -111,7 +128,12 @@ function openTaskForm(existing) {
         const freq = fd.get('freq');
         const title = fd.get('title').trim();
 
-        let data = { title, completedDates: existing?.completedDates || [] };
+        let data = {
+          title,
+          category: fd.get('category'),
+          assignee: fd.get('assignee') || null,
+          completedDates: existing?.completedDates || []
+        };
 
         if (freq === 'none') {
           data.dueDate = fd.get('dueDate');
@@ -156,34 +178,55 @@ async function toggleOccurrence(task, dateStr, checked) {
   await tasksStore.set(task.id, { completedDates: [...set] });
 }
 
+function taskRowHtml(task, today) {
+  const occ = nextOccurrence(task, today) || task.dueDate;
+  const done = occ ? isCompletedForOccurrence(task, occ) : false;
+  const label = describeRecurrence(task.recurrence);
+  const dateLabel = occ ? occ.split('-').reverse().join('/') : '';
+  const assigneeName = getMemberName(task.assignee);
+  return `
+    <div class="task-row ${done ? 'done' : ''}" data-id="${task.id}" data-occ="${occ || ''}">
+      <input type="checkbox" class="task-check" ${done ? 'checked' : ''}>
+      <div class="task-info">
+        <div>${task.title}</div>
+        <div class="task-recur">${label}${dateLabel ? ' · próxima: ' + dateLabel : ''}${assigneeName ? ' · 👤 ' + assigneeName : ''}</div>
+      </div>
+      <button type="button" class="btn-secondary edit-task">✎</button>
+    </div>
+  `;
+}
+
 function render() {
   const container = document.getElementById('taskList');
   if (!container) return;
   const today = todayStr();
-  const tasks = [...tasksStore.list].sort((a, b) => {
-    const na = nextOccurrence(a, today) || '9999-99-99';
-    const nb = nextOccurrence(b, today) || '9999-99-99';
-    return na.localeCompare(nb);
+
+  const byCategory = { tarefa: [], rotina: [], outro: [] };
+  tasksStore.list.forEach((t) => {
+    const cat = byCategory[t.category] ? t.category : 'tarefa';
+    byCategory[cat].push(t);
   });
 
-  if (!tasks.length) {
+  Object.values(byCategory).forEach((list) => {
+    list.sort((a, b) => {
+      const na = nextOccurrence(a, today) || '9999-99-99';
+      const nb = nextOccurrence(b, today) || '9999-99-99';
+      return na.localeCompare(nb);
+    });
+  });
+
+  if (!tasksStore.list.length) {
     container.innerHTML = '<p class="hint">Nenhuma tarefa cadastrada.</p>';
     return;
   }
 
-  container.innerHTML = tasks.map((task) => {
-    const occ = nextOccurrence(task, today) || task.dueDate;
-    const done = occ ? isCompletedForOccurrence(task, occ) : false;
-    const label = describeRecurrence(task.recurrence);
-    const dateLabel = occ ? occ.split('-').reverse().join('/') : '';
+  container.innerHTML = CATEGORIES.map(({ v, l }) => {
+    const list = byCategory[v];
+    if (!list.length) return '';
     return `
-      <div class="task-row ${done ? 'done' : ''}" data-id="${task.id}" data-occ="${occ || ''}">
-        <input type="checkbox" class="task-check" ${done ? 'checked' : ''}>
-        <div class="task-info">
-          <div>${task.title}</div>
-          <div class="task-recur">${label}${dateLabel ? ' · próxima: ' + dateLabel : ''}</div>
-        </div>
-        <button type="button" class="btn-secondary edit-task">✎</button>
+      <div class="task-category-group">
+        <h3 style="color:var(--green); margin:14px 0 6px;">${l}</h3>
+        ${list.map((t) => taskRowHtml(t, today)).join('')}
       </div>
     `;
   }).join('');
@@ -199,6 +242,7 @@ function render() {
 
 export function initTasks() {
   tasksStore.subscribe(render);
+  membersStore.subscribe(render);
   document.getElementById('addTaskBtn').addEventListener('click', () => openTaskForm(null));
 }
 

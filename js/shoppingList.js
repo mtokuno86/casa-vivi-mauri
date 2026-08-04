@@ -6,6 +6,7 @@ import { createStore } from './store.js';
 import { recipesStore } from './recipes.js';
 import { getRecipeIdsForWeek, getCurrentWeekStart, mealPlanStore } from './mealPlanner.js';
 import { openModal } from './modal.js';
+import { pantryStockStore, houseStockStore, findPantryItemByName, getLowStockItems, openItemForm as openStockItemForm } from './stock.js';
 
 export const shoppingExtrasStore = createStore('shoppingExtras'); // itens avulsos: { name, checked }
 export const shoppingChecksStore = createStore('shoppingChecks'); // marcação de itens auto-gerados por semana: id = `${weekStart}:${key}`, { checked: true }
@@ -60,14 +61,35 @@ function render() {
   const autoHtml = items.length ? items.map((item) => {
     const checkId = `${weekStart}:${item.key}`;
     const checked = !!shoppingChecksStore.getById(checkId)?.checked;
+    const pantryMatch = findPantryItemByName(item.name);
+    const stockTag = pantryMatch && pantryMatch.qty > 0
+      ? `<span style="margin-left:6px; font-size:0.72rem; color:#3a6351;" title="Já tem em estoque">✓ tem ${pantryMatch.qty} ${pantryMatch.unit || ''}</span>`
+      : '';
     return `
       <div class="shopping-item ${checked ? 'checked' : ''}" data-check-id="${checkId}" data-source="auto">
         <input type="checkbox" ${checked ? 'checked' : ''}>
-        <span>${item.qtyLabel ? item.qtyLabel + ' ' : ''}${item.unit ? item.unit + ' ' : ''}${item.name}</span>
+        <span>${item.qtyLabel ? item.qtyLabel + ' ' : ''}${item.unit ? item.unit + ' ' : ''}${item.name}${stockTag}</span>
         <span style="margin-left:auto; font-size:0.75rem; color:#999;" title="${item.recipes.join(', ')}">🍽️</span>
       </div>
     `;
   }).join('') : '<p class="hint">Nenhum ingrediente — preencha o cardápio da semana em "Cardápio".</p>';
+
+  // Itens básicos: ingredientes ou itens da casa que ficaram abaixo do mínimo
+  // configurado no Estoque.
+  const lowPantry = getLowStockItems(pantryStockStore).map((i) => ({ ...i, kind: 'ingrediente' }));
+  const lowHouse = getLowStockItems(houseStockStore).map((i) => ({ ...i, kind: 'casa' }));
+  const lowItems = [...lowPantry, ...lowHouse].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const basicsHtml = lowItems.length ? lowItems.map((item) => {
+    const checkId = `basic:${item.kind}:${item.id}`;
+    const checked = !!shoppingChecksStore.getById(checkId)?.checked;
+    return `
+      <div class="shopping-item ${checked ? 'checked' : ''}" data-check-id="${checkId}" data-source="basic" data-kind="${item.kind}" data-item-id="${item.id}">
+        <input type="checkbox" ${checked ? 'checked' : ''}>
+        <span>${item.name} <span style="font-size:0.75rem; color:#999;">(${item.qty} ${item.unit || ''}, mín. ${item.minQty})</span></span>
+        <button type="button" class="restock-btn" style="margin-left:auto; background:none; border:none; color:var(--green);" title="Atualizar estoque após comprar">↻ repor</button>
+      </div>
+    `;
+  }).join('') : '<p class="hint">Nada em falta no estoque básico da casa 👍</p>';
 
   const extras = shoppingExtrasStore.list;
   const extrasHtml = extras.map((item) => `
@@ -84,7 +106,11 @@ function render() {
       ${autoHtml}
     </div>
     <div class="shopping-group">
-      <h4>Itens avulsos</h4>
+      <h4>Itens básicos da casa (estoque em falta)</h4>
+      ${basicsHtml}
+    </div>
+    <div class="shopping-group">
+      <h4>Outros / wishlist</h4>
       ${extrasHtml || '<p class="hint">Nenhum item avulso.</p>'}
     </div>
   `;
@@ -92,6 +118,17 @@ function render() {
   container.querySelectorAll('.shopping-item[data-source="auto"]').forEach((row) => {
     row.querySelector('input').addEventListener('change', (e) => {
       shoppingChecksStore.set(row.dataset.checkId, { checked: e.target.checked });
+    });
+  });
+
+  container.querySelectorAll('.shopping-item[data-source="basic"]').forEach((row) => {
+    row.querySelector('input').addEventListener('change', (e) => {
+      shoppingChecksStore.set(row.dataset.checkId, { checked: e.target.checked });
+    });
+    row.querySelector('.restock-btn').addEventListener('click', () => {
+      const store = row.dataset.kind === 'ingrediente' ? pantryStockStore : houseStockStore;
+      const item = store.getById(row.dataset.itemId);
+      if (item) openStockItemForm(store, item);
     });
   });
 
@@ -135,6 +172,8 @@ export function initShoppingList() {
   shoppingChecksStore.subscribe(render);
   recipesStore.subscribe(render);
   mealPlanStore.subscribe(render);
+  pantryStockStore.subscribe(render);
+  houseStockStore.subscribe(render);
   document.getElementById('addShoppingItemBtn').addEventListener('click', openAddExtraModal);
 
   // Re-renderiza também quando o usuário troca de semana no cardápio.

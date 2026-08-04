@@ -126,19 +126,65 @@ mudanças.
 
 ---
 
-## 6. Testando
+## 6. Importação de receitas via link (opcional)
+
+Isso liga o botão "Importar de link" no cadastro de receitas: cola um link de
+receita e o app tenta preencher sozinho ingredientes, tempo de preparo e
+rendimento (quando o site tiver esses dados estruturados — nem todos têm).
+Funciona por meio de uma **Cloud Function** (um programinha que roda no
+servidor do Google, fora do app) que já vem pronta na pasta `functions/`.
+
+**Requisito importante:** Cloud Functions não roda no plano gratuito (Spark)
+do Firebase — precisa fazer upgrade para o plano **Blaze** (pay-as-you-go),
+que pede um cartão cadastrado. Para o volume de uso de vocês dois, o custo
+real deve ficar em R$ 0 (dentro da cota gratuita mensal), mas o cadastro do
+cartão é exigido mesmo assim.
+
+1. No Firebase Console → ⚙ **Uso e faturamento** → faça upgrade para o plano
+   **Blaze**.
+2. No terminal, na pasta do projeto (a mesma onde rodou `firebase init hosting`):
+   ```bash
+   firebase init functions
+   ```
+   - Escolha o mesmo projeto do passo 1.
+   - Linguagem: **JavaScript**.
+   - Se perguntar se pode sobrescrever `functions/package.json` ou
+     `functions/index.js`, responda **Não** — esses arquivos já vieram prontos.
+   - Instale as dependências quando perguntado (ou rode `cd functions && npm install` depois).
+3. Deploy:
+   ```bash
+   firebase deploy --only functions
+   ```
+4. Ao final, o terminal mostra a URL da função, parecida com:
+   ```
+   https://southamerica-east1-casa-vivi-mauri.cloudfunctions.net/parseRecipe
+   ```
+5. Cole essa URL em `js/config.js`, na constante `recipeImportFunctionUrl`.
+6. Publique de novo (redeploy do hosting, ou reenvie os arquivos alterados no
+   GitHub Pages).
+
+Teste: aba **Receitas** → "+ Nova receita" → cole um link de receita no campo
+"Importar de um link" → "Importar". Quando o site não tiver os dados
+estruturados que a função procura, ela avisa e é só preencher manualmente.
+
+---
+
+## 7. Testando
 
 - Abra o app no celular, toque em **"Conectar Google"** no topo, faça login (vai
   aparecer um aviso de "app não verificado" — é esperado, toque em **Avançado →
   Acessar mesmo assim**, já que vocês estão na lista de usuários de teste).
+- Cadastre um ou dois membros da casa (botão "👥 Membros" no topo).
 - Cadastre uma receita, monte o cardápio da semana, veja a lista de compras se
   atualizar sozinha.
+- Cadastre alguns itens no **Estoque** com um mínimo — veja um deles ficando
+  "em falta" e aparecendo na Lista de compras.
 - Abra no tablet e confirme que os mesmos dados aparecem (sincronização via
   Firestore).
 
 ---
 
-## 7. Publicar depois na Play Store (etapa futura, separada)
+## 8. Publicar depois na Play Store (etapa futura, separada)
 
 Quando estiver satisfeito com o app em uso doméstico, dá para empacotar essa mesma
 PWA como um app Android de verdade usando o **Bubblewrap** (ferramenta oficial do
