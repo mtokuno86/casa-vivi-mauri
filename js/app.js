@@ -12,6 +12,11 @@
 // ============================================================================
 import { initDb, getMode } from './db.js';
 
+// Atualize esta linha a cada nova versão publicada — é o "carimbo" visível
+// no topo do app para confirmar se o aparelho já pegou a versão mais nova.
+// Formato livre, sugiro data + hora de quando o ajuste foi feito.
+const BUILD_STAMP = '2026-08-05 16:10';
+
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');
   const views = document.querySelectorAll('.view');
@@ -41,6 +46,9 @@ function initSyncStatusIndicator() {
 }
 
 async function main() {
+  const stampEl = document.getElementById('buildStamp');
+  if (stampEl) stampEl.textContent = `· v. ${BUILD_STAMP}`;
+
   // 1) Firebase (ou modo local) precisa estar pronto ANTES de qualquer
   //    módulo de feature ser carregado.
   await initDb();
@@ -88,9 +96,35 @@ async function main() {
   authMod.initAuth().catch((e) => console.warn('Google não inicializado:', e));
   photosMod.initPhotoGallery();
 
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js').catch((e) => console.warn('Service worker falhou:', e));
-  }
+  registerServiceWorker();
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  // updateViaCache: 'none' garante que o navegador sempre busque o
+  // service-worker.js de verdade na rede para checar se mudou, em vez de
+  // usar uma cópia em cache HTTP — é essa checagem "preguiçosa" que fazia
+  // o app parecer travado numa versão antiga mesmo depois de publicar uma
+  // nova.
+  navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' })
+    .then((registration) => {
+      // Enquanto o app ficar aberto (o tablet da geladeira, por exemplo),
+      // verifica de tempos em tempos se há uma versão nova publicada.
+      setInterval(() => registration.update(), 60 * 60 * 1000);
+    })
+    .catch((e) => console.warn('Service worker falhou:', e));
+
+  // Quando uma versão nova do service worker assume o controle da página,
+  // recarrega a página automaticamente uma única vez — sem isso, o usuário
+  // precisava fechar e abrir o app manualmente (ou limpar dados do site)
+  // para ver a atualização.
+  let refreshingPage = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshingPage) return;
+    refreshingPage = true;
+    window.location.reload();
+  });
 }
 
 main();
