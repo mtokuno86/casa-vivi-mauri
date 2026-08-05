@@ -6,7 +6,9 @@ import { googleClientId, googleApiKey } from './config.js';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/drive.readonly'
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile'
 ].join(' ');
 
 let tokenClient = null;
@@ -14,6 +16,7 @@ let gapiReady = false;
 let signedIn = false;
 let accessToken = null;
 let refreshTimer = null;
+let userInfo = null; // { email, name, picture } — carregado após login
 const listeners = new Set();
 
 const TOKEN_STORAGE_KEY = 'casa-vm:googleToken';
@@ -58,6 +61,25 @@ export function getAccessToken() {
   return accessToken;
 }
 
+/** Retorna { email, name, picture } da conta Google logada, ou null. */
+export function getUserInfo() {
+  return userInfo;
+}
+
+async function fetchUserInfo() {
+  try {
+    const resp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    userInfo = { email: data.email || null, name: data.name || null, picture: data.picture || null };
+    notify();
+  } catch (e) {
+    console.warn('Não foi possível obter dados do perfil Google:', e);
+  }
+}
+
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -99,6 +121,7 @@ function applyToken(token, expiresInSec) {
   saveTokenToStorage(token, expiresAtMs);
   scheduleSilentRefresh(expiresInSec || 3300);
   notify();
+  fetchUserInfo();
 }
 
 export async function initAuth() {

@@ -156,6 +156,14 @@ function openRecipeForm(existing) {
           ingredients
         };
 
+        if (!existing) {
+          const key = data.title.trim().toLowerCase();
+          const dup = recipesStore.list.find((r) => (r.title || '').trim().toLowerCase() === key);
+          if (dup && !window.confirm(`Já existe uma receita chamada "${dup.title}". Cadastrar mesmo assim?`)) {
+            return;
+          }
+        }
+
         if (existing) {
           await recipesStore.set(existing.id, data);
         } else {
