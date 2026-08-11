@@ -51,6 +51,15 @@ function aggregateIngredients(weekStart) {
   }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 }
 
+/** Ingredientes do cardápio da semana atual, para o widget do dashboard. */
+export function getMenuShoppingItems() {
+  const weekStart = getCurrentWeekStart();
+  return aggregateIngredients(weekStart).map((item) => {
+    const checkId = `${weekStart}:${item.key}`;
+    return { ...item, checkId, checked: !!shoppingChecksStore.getById(checkId)?.checked };
+  });
+}
+
 function render() {
   const container = document.getElementById('shoppingList');
   if (!container) return;

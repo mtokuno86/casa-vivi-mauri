@@ -43,15 +43,23 @@ function renderEmpty(message) {
 function renderGallery() {
   const gallery = document.getElementById('photoGallery');
   if (!gallery) return;
-  gallery.innerHTML = blobUrls.map((url, i) => `<img src="${url}" class="${i === 0 ? 'visible' : ''}" data-i="${i}">`).join('');
+  // Cada slide tem um fundo desfocado (a própria foto, ampliada e borrada)
+  // atrás da foto nítida — assim fotos em pé (retrato) preenchem as laterais
+  // de forma elegante em vez de aparecer cortada ou com barras pretas.
+  gallery.innerHTML = blobUrls.map((url, i) => `
+    <div class="photo-slide ${i === 0 ? 'visible' : ''}" data-i="${i}">
+      <div class="photo-bg" style="background-image:url('${url}')"></div>
+      <img src="${url}" class="photo-fg">
+    </div>
+  `).join('');
   currentIndex = 0;
   clearInterval(rotationTimer);
   rotationTimer = setInterval(() => {
-    const imgs = gallery.querySelectorAll('img');
-    if (!imgs.length) return;
-    imgs[currentIndex].classList.remove('visible');
-    currentIndex = (currentIndex + 1) % imgs.length;
-    imgs[currentIndex].classList.add('visible');
+    const slides = gallery.querySelectorAll('.photo-slide');
+    if (!slides.length) return;
+    slides[currentIndex].classList.remove('visible');
+    currentIndex = (currentIndex + 1) % slides.length;
+    slides[currentIndex].classList.add('visible');
   }, photoRotationMs);
 }
 

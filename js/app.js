@@ -15,7 +15,7 @@ import { initDb, getMode } from './db.js';
 // Atualize esta linha a cada nova versão publicada — é o "carimbo" visível
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, sugiro data + hora de quando o ajuste foi feito.
-const BUILD_STAMP = '2026-08-05 16:10';
+const BUILD_STAMP = '2026-08-11 14:00';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');
@@ -28,6 +28,62 @@ function initTabs(onTabChange) {
       document.getElementById(`view-${btn.dataset.tab}`).classList.add('active');
       onTabChange(btn.dataset.tab);
     });
+  });
+}
+
+// ============================================================================
+// Wake Lock — mantém a tela ligada. Pensado pro tablet fixo na tomada, na
+// geladeira: sem isso, a tela apagaria sozinha depois de alguns minutos e o
+// dashboard perderia a graça. Consome mais bateria, por isso é opt-in (fica
+// desligado por padrão e a escolha é lembrada por aparelho).
+// ============================================================================
+const WAKE_LOCK_STORAGE_KEY = 'casa-vm:wakeLockEnabled';
+let wakeLockSentinel = null;
+
+function isWakeLockSupported() {
+  return 'wakeLock' in navigator;
+}
+
+async function applyWakeLock(enabled) {
+  const btn = document.getElementById('wakeLockBtn');
+  if (enabled) {
+    try {
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+      wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+      if (btn) { btn.textContent = '🔆 Tela sempre ligada'; btn.title = 'Toque para voltar a apagar a tela sozinha (economiza bateria)'; }
+    } catch (e) {
+      console.warn('Não foi possível manter a tela ligada:', e);
+      if (btn) btn.textContent = '🔅 Tela sempre ligada (falhou)';
+    }
+  } else {
+    if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
+    if (btn) { btn.textContent = '🔅 Tela sempre ligada'; btn.title = 'Manter a tela ligada (recomendado para o tablet fixo na tomada)'; }
+  }
+}
+
+function initWakeLock() {
+  const btn = document.getElementById('wakeLockBtn');
+  if (!btn) return;
+  if (!isWakeLockSupported()) {
+    btn.style.display = 'none';
+    return;
+  }
+  let enabled = localStorage.getItem(WAKE_LOCK_STORAGE_KEY) === 'true';
+  applyWakeLock(enabled);
+
+  btn.addEventListener('click', () => {
+    enabled = !enabled;
+    localStorage.setItem(WAKE_LOCK_STORAGE_KEY, String(enabled));
+    applyWakeLock(enabled);
+  });
+
+  // O navegador solta o wake lock sozinho quando a aba perde o foco/fica
+  // oculta (ex: tablet apagou a tela antes de a gente conseguir pedir de
+  // novo). Ao voltar a ficar visível, reativa se a preferência ainda for "on".
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && enabled && !wakeLockSentinel) {
+      applyWakeLock(true);
+    }
   });
 }
 
@@ -71,6 +127,7 @@ async function main() {
   ]);
 
   initSyncStatusIndicator();
+  initWakeLock();
 
   const googleBtn = document.getElementById('googleSignInBtn');
   googleBtn.addEventListener('click', authMod.signIn);

@@ -13,8 +13,25 @@ const localEventsStore = createStore('localEvents'); // { title, date, time, all
 
 let connected = false;
 let googleEventsCache = [];
+const eventsChangeListeners = new Set();
 
 const CALENDAR_IDS = (googleCalendarIds && googleCalendarIds.length) ? googleCalendarIds : ['primary'];
+
+// Calendários públicos (ex: feriados) são só para leitura — não faz sentido
+// oferecê-los como destino ao criar um novo compromisso (a gente não tem
+// permissão de escrever neles, a chamada de insert falharia).
+const isReadOnlyCalendar = (id) => id.includes('#holiday@');
+const WRITABLE_CALENDAR_IDS = CALENDAR_IDS.filter((id) => !isReadOnlyCalendar(id));
+
+// Nomes amigáveis para os IDs de calendário mais comuns, já que o ID bruto
+// de um calendário público (ex: "en.brazilian.official#holiday@...") não é
+// legível na tela.
+function calendarLabel(id) {
+  if (!id || id === 'primary') return 'Meu calendário';
+  if (id.includes('brazilian') && id.includes('#holiday@')) return '🇧🇷 Feriados nacionais';
+  if (id.includes('#holiday@')) return '📅 Feriados';
+  return id;
+}
 
 onAuthChange((signedIn) => {
   connected = signedIn;
@@ -77,6 +94,19 @@ export function getTodayEvents() {
   return getAllEvents().filter((e) => e.date === today);
 }
 
+/** Eventos entre duas datas 'YYYY-MM-DD', inclusive (comparação por string funciona por ser ISO). */
+export function getEventsInRange(startDate, endDate) {
+  return getAllEvents()
+    .filter((e) => e.date >= startDate && e.date <= endDate)
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+}
+
+/** Registra um callback pra re-render quando os eventos mudarem (Google ou local). */
+export function onEventsChange(cb) {
+  eventsChangeListeners.add(cb);
+  return () => eventsChangeListeners.delete(cb);
+}
+
 async function addEvent({ title, date, time, calendarId }) {
   if (connected && window.gapi?.client?.calendar) {
     const event = time
@@ -91,7 +121,7 @@ async function addEvent({ title, date, time, calendarId }) {
 }
 
 function openEventForm() {
-  const showCalendarPicker = connected && CALENDAR_IDS.length > 1;
+  const showCalendarPicker = connected && WRITABLE_CALENDAR_IDS.length > 1;
   openModal({
     title: 'Novo compromisso',
     bodyHtml: `
@@ -105,7 +135,7 @@ function openEventForm() {
         ${showCalendarPicker ? `
           <label>Adicionar no calendário de</label>
           <select name="calendarId">
-            ${CALENDAR_IDS.map((id) => `<option value="${id}">${id === 'primary' ? 'Meu calendário' : id}</option>`).join('')}
+            ${WRITABLE_CALENDAR_IDS.map((id) => `<option value="${id}">${calendarLabel(id)}</option>`).join('')}
           </select>
         ` : ''}
         <div class="modal-actions">
@@ -154,9 +184,10 @@ function render() {
       <strong>${e.date.split('-').reverse().join('/')}</strong>
       ${e.time ? e.time : ''}
       — ${e.title}
-      ${e.calendarId && e.calendarId !== 'primary' ? `<span style="margin-left:auto; font-size:0.75rem; color:#999;">${e.calendarId}</span>` : ''}
+      ${e.calendarId && e.calendarId !== 'primary' ? `<span style="margin-left:auto; font-size:0.75rem; color:#999;">${calendarLabel(e.calendarId)}</span>` : ''}
     </li>
   `).join('');
+  eventsChangeListeners.forEach((cb) => cb());
 }
 
 export function initCalendar() {

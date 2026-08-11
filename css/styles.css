@@ -98,6 +98,55 @@ main#views { flex: 1; padding: 16px; max-width: 1000px; margin: 0 auto; width: 1
   .dash-grid { grid-template-columns: 1fr; }
 }
 
+.dash-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .dash-grid-3 { grid-template-columns: 1fr; }
+}
+
+.cal-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.cal-mini-cell {
+  background: var(--cream);
+  border-radius: 8px;
+  padding: 5px 6px;
+  min-height: 70px;
+  max-height: 92px;
+  overflow: hidden;
+  font-size: 0.68rem;
+}
+
+.cal-mini-cell.this-week { background: #e9f2ec; }
+.cal-mini-cell.today { border: 2px solid var(--accent); }
+
+.cal-mini-day {
+  font-weight: 700;
+  font-size: 0.72rem;
+  color: var(--green);
+  margin-bottom: 2px;
+}
+
+.cal-mini-event {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.cal-mini-more { color: #999; font-size: 0.65rem; }
+
+@media (max-width: 700px) {
+  .cal-mini-grid { grid-template-columns: repeat(7, minmax(60px, 1fr)); overflow-x: auto; }
+}
+
 .photo-gallery {
   position: relative;
   width: 100%;
@@ -110,17 +159,30 @@ main#views { flex: 1; padding: 16px; max-width: 1000px; margin: 0 auto; width: 1
   justify-content: center;
 }
 
-.photo-gallery img {
+.photo-slide {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
   opacity: 0;
   transition: opacity 1.2s ease;
 }
 
-.photo-gallery img.visible { opacity: 1; }
+.photo-slide.visible { opacity: 1; }
+
+.photo-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(24px) brightness(0.65);
+  transform: scale(1.15); /* evita bordas claras do blur aparecendo nas laterais */
+}
+
+.photo-fg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* fotos em pé aparecem inteiras, sem cortar */
+}
 
 .photo-empty { padding: 20px; text-align: center; color: #776; font-size: 0.9rem; }
 

@@ -32,7 +32,10 @@ export const photosDriveFolderId = "148ch_pbMKjeIJjPbrL7OiqDSMcZ5_Uvr";
 // específicas > adicionar o e-mail, com permissão "Ver todos os detalhes do
 // evento"). Depois disso, é só descomentar a linha abaixo:
 export const googleCalendarIds = [
-  "primary"
+  "primary",
+  // Feriados nacionais do Brasil — calendário público do Google, não precisa
+  // de nenhum compartilhamento. Comente a linha abaixo se não quiser vê-los.
+  "en.brazilian.official#holiday@group.v.calendar.google.com"
   // , "vivianehatano@gmail.com"
 ];
 

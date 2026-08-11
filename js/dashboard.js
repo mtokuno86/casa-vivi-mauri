@@ -5,12 +5,15 @@
 import { mealPlanStore } from './mealPlanner.js';
 import { recipesStore } from './recipes.js';
 import { getTodayTasks, toggleTodayTask, tasksStore } from './tasks.js';
-import { getTodayEvents } from './calendar.js';
-import { todayStr } from './recurrence.js';
+import { getTodayEvents, getEventsInRange, onEventsChange } from './calendar.js';
+import { todayStr, addDaysStr } from './recurrence.js';
 import { getMemberName, membersStore } from './members.js';
+import { pantryStockStore, houseStockStore, getLowStockItems } from './stock.js';
+import { getMenuShoppingItems, shoppingChecksStore } from './shoppingList.js';
 
 const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+const DIAS_ABREV = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
 function renderDateHeader() {
   const el = document.getElementById('todayDate');
@@ -63,12 +66,83 @@ function renderTodayEvents() {
     : '<li class="hint">Nenhum compromisso hoje.</li>';
 }
 
+function renderCalendarMonth() {
+  const el = document.getElementById('calMiniGrid');
+  if (!el) return;
+  const today = todayStr();
+  const rangeEnd = addDaysStr(today, 29);
+  const events = getEventsInRange(today, rangeEnd);
+  const eventsByDate = new Map();
+  events.forEach((e) => {
+    if (!eventsByDate.has(e.date)) eventsByDate.set(e.date, []);
+    eventsByDate.get(e.date).push(e);
+  });
+
+  const MAX_VISIBLE = 3;
+  let html = '';
+  for (let i = 0; i < 30; i++) {
+    const date = addDaysStr(today, i);
+    const d = new Date(date + 'T12:00:00');
+    const dayEvents = eventsByDate.get(date) || [];
+    const shown = dayEvents.slice(0, MAX_VISIBLE);
+    const extra = dayEvents.length - shown.length;
+    const cls = ['cal-mini-cell'];
+    if (i < 7) cls.push('this-week');
+    if (i === 0) cls.push('today');
+    html += `
+      <div class="${cls.join(' ')}">
+        <div class="cal-mini-day">${DIAS_ABREV[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}</div>
+        ${shown.map((e) => `<div class="cal-mini-event" title="${e.title}">${e.time ? e.time + ' ' : ''}${e.title}</div>`).join('')}
+        ${extra > 0 ? `<div class="cal-mini-more">+${extra} mais</div>` : ''}
+      </div>
+    `;
+  }
+  el.innerHTML = html;
+}
+
+function renderMenuShopping() {
+  const el = document.getElementById('menuShoppingItems');
+  if (!el) return;
+  const items = getMenuShoppingItems();
+  el.innerHTML = items.length
+    ? items.map((item) => `
+      <li style="${item.checked ? 'text-decoration:line-through; opacity:0.5;' : ''}">
+        ${item.qtyLabel ? item.qtyLabel + ' ' : ''}${item.unit ? item.unit + ' ' : ''}${item.name}
+      </li>
+    `).join('')
+    : '<li class="hint">Cardápio da semana vazio.</li>';
+}
+
+function renderLowStock() {
+  const card = document.getElementById('lowStockCard');
+  const el = document.getElementById('lowStockItems');
+  if (!card || !el) return;
+  const missing = [
+    ...getLowStockItems(pantryStockStore).map((item) => ({ ...item, kind: 'Ingrediente' })),
+    ...getLowStockItems(houseStockStore).map((item) => ({ ...item, kind: 'Item da casa' }))
+  ];
+  if (!missing.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  el.innerHTML = missing.map((item) => `
+    <li>
+      <span>${item.name} <span style="color:#999; font-size:0.8rem;">· ${item.kind}${item.qty !== undefined ? ' · ' + item.qty + (item.unit ? ' ' + item.unit : '') + ' (mín. ' + item.minQty + ')' : ''}</span></span>
+    </li>
+  `).join('');
+}
+
 export function initDashboard() {
   renderDateHeader();
-  mealPlanStore.subscribe(renderTodayMeals);
-  recipesStore.subscribe(renderTodayMeals);
+  mealPlanStore.subscribe(() => { renderTodayMeals(); renderMenuShopping(); });
+  recipesStore.subscribe(() => { renderTodayMeals(); renderMenuShopping(); });
   tasksStore.subscribe(renderTodayTasks);
   membersStore.subscribe(renderTodayTasks);
+  pantryStockStore.subscribe(renderLowStock);
+  houseStockStore.subscribe(renderLowStock);
+  shoppingChecksStore.subscribe(renderMenuShopping);
+  onEventsChange(renderCalendarMonth);
   refreshDashboard();
   // Tablet fica fixo na geladeira o dia todo — atualiza sozinho de tempos em tempos
   // (troca de dia à meia-noite, novos eventos do Google Calendar, etc.).
@@ -80,4 +154,7 @@ export function refreshDashboard() {
   renderTodayMeals();
   renderTodayTasks();
   renderTodayEvents();
+  renderCalendarMonth();
+  renderMenuShopping();
+  renderLowStock();
 }
