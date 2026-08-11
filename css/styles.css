@@ -184,6 +184,19 @@ main#views { flex: 1; padding: 16px; max-width: 1000px; margin: 0 auto; width: 1
   object-fit: contain; /* fotos em pé aparecem inteiras, sem cortar */
 }
 
+.photo-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.72rem;
+  padding: 3px 10px;
+  border-radius: 20px;
+  z-index: 2;
+}
+
 .photo-empty { padding: 20px; text-align: center; color: #776; font-size: 0.9rem; }
 
 .today-meals { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }

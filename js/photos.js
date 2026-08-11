@@ -7,17 +7,41 @@ import { photosDriveFolderId, photoRotationMs } from './config.js';
 import { onAuthChange, getAccessToken, isConfigured } from './auth.js';
 
 let blobUrls = [];
+let slides = []; // { url, dateLabel }
 let rotationTimer = null;
 let currentIndex = 0;
 
 async function fetchFileList() {
   const resp = await window.gapi.client.drive.files.list({
     q: `'${photosDriveFolderId}' in parents and mimeType contains 'image/' and trashed = false`,
-    fields: 'files(id, name)',
+    fields: 'files(id, name, createdTime, imageMediaMetadata)',
     pageSize: 50,
     orderBy: 'modifiedTime desc'
   });
   return resp.result.files || [];
+}
+
+/**
+ * Data em que a foto foi tirada, formatada em pt-BR (dd/mm/aaaa).
+ * Prioriza o metadado EXIF (imageMediaMetadata.time, no formato
+ * "AAAA:MM:DD HH:MM:SS") — é a data real da foto. Se a foto não tiver esse
+ * metadado (ex: veio de print/edição), usa a data de criação no Drive como
+ * aproximação.
+ */
+function formatPhotoDate(file) {
+  const raw = file.imageMediaMetadata?.time || file.createdTime;
+  if (!raw) return null;
+  let d;
+  if (raw.includes('T')) {
+    d = new Date(raw); // createdTime, formato ISO
+  } else {
+    const [datePart, timePart] = raw.split(' ');
+    const [y, m, day] = (datePart || '').split(':');
+    if (!y || !m || !day) return null;
+    d = new Date(`${y}-${m}-${day}T${timePart || '00:00:00'}`);
+  }
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('pt-BR');
 }
 
 async function fetchImageBlobUrl(fileId) {
@@ -46,10 +70,11 @@ function renderGallery() {
   // Cada slide tem um fundo desfocado (a própria foto, ampliada e borrada)
   // atrás da foto nítida — assim fotos em pé (retrato) preenchem as laterais
   // de forma elegante em vez de aparecer cortada ou com barras pretas.
-  gallery.innerHTML = blobUrls.map((url, i) => `
+  gallery.innerHTML = slides.map((s, i) => `
     <div class="photo-slide ${i === 0 ? 'visible' : ''}" data-i="${i}">
-      <div class="photo-bg" style="background-image:url('${url}')"></div>
-      <img src="${url}" class="photo-fg">
+      <div class="photo-bg" style="background-image:url('${s.url}')"></div>
+      <img src="${s.url}" class="photo-fg">
+      ${s.dateLabel ? `<div class="photo-caption">${s.dateLabel}</div>` : ''}
     </div>
   `).join('');
   currentIndex = 0;
@@ -86,6 +111,7 @@ async function loadGallery() {
     }
     revokeAll();
     blobUrls = await Promise.all(files.map((f) => fetchImageBlobUrl(f.id)));
+    slides = files.map((f, i) => ({ url: blobUrls[i], dateLabel: formatPhotoDate(f) }));
     renderGallery();
   } catch (e) {
     console.error('Erro carregando galeria de fotos:', e);
