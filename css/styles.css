@@ -126,6 +126,8 @@ main#views { flex: 1; padding: 16px; max-width: 1000px; margin: 0 auto; width: 1
 
 .cal-mini-cell.this-week { background: #e9f2ec; }
 .cal-mini-cell.today { border: 2px solid var(--accent); }
+.cal-mini-cell.weekend { background: #f2ece0; }
+.cal-mini-cell.this-week.weekend { background: #e6e9d8; }
 
 .cal-mini-day {
   font-weight: 700;
@@ -291,6 +293,18 @@ ul.today-tasks li, ul.today-events li, ul.event-list li {
 .recipe-card h3 { margin: 0 0 4px; }
 .recipe-card a { color: var(--green); }
 .recipe-card .ingredients { font-size: 0.85rem; color: #555; margin-top: 6px; }
+
+.recipe-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.recipe-tag {
+  background: var(--green-light);
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.recipe-filters label { margin-top: 8px; }
 
 .task-row { display: flex; align-items: center; gap: 12px; }
 .task-row.done { opacity: 0.5; text-decoration: line-through; }

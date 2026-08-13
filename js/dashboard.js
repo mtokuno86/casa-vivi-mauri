@@ -66,12 +66,27 @@ function renderTodayEvents() {
     : '<li class="hint">Nenhum compromisso hoje.</li>';
 }
 
+// Segunda-feira da semana atual — assim o grid sempre começa alinhado com a
+// coluna "seg" e termina num domingo, agrupando visualmente os fins de semana.
+function mondayOfCurrentWeek() {
+  const today = todayStr();
+  const dow = new Date(today + 'T12:00:00').getDay(); // 0=domingo .. 6=sábado
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  return addDaysStr(today, diffToMonday);
+}
+
+// 4 semanas fechadas (28 dias, seg→dom) em vez de "30 dias corridos" — fica
+// um grid retangular e sempre termina num fim de semana completo.
+const CAL_WEEKS = 4;
+
 function renderCalendarMonth() {
   const el = document.getElementById('calMiniGrid');
   if (!el) return;
   const today = todayStr();
-  const rangeEnd = addDaysStr(today, 29);
-  const events = getEventsInRange(today, rangeEnd);
+  const start = mondayOfCurrentWeek();
+  const totalDays = CAL_WEEKS * 7;
+  const rangeEnd = addDaysStr(start, totalDays - 1);
+  const events = getEventsInRange(start, rangeEnd);
   const eventsByDate = new Map();
   events.forEach((e) => {
     if (!eventsByDate.has(e.date)) eventsByDate.set(e.date, []);
@@ -80,15 +95,16 @@ function renderCalendarMonth() {
 
   const MAX_VISIBLE = 3;
   let html = '';
-  for (let i = 0; i < 30; i++) {
-    const date = addDaysStr(today, i);
+  for (let i = 0; i < totalDays; i++) {
+    const date = addDaysStr(start, i);
     const d = new Date(date + 'T12:00:00');
     const dayEvents = eventsByDate.get(date) || [];
     const shown = dayEvents.slice(0, MAX_VISIBLE);
     const extra = dayEvents.length - shown.length;
     const cls = ['cal-mini-cell'];
     if (i < 7) cls.push('this-week');
-    if (i === 0) cls.push('today');
+    if (date === today) cls.push('today');
+    if (d.getDay() === 0 || d.getDay() === 6) cls.push('weekend');
     html += `
       <div class="${cls.join(' ')}">
         <div class="cal-mini-day">${DIAS_ABREV[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}</div>
