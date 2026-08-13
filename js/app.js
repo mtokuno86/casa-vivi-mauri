@@ -15,7 +15,7 @@ import { initDb, getMode } from './db.js';
 // Atualize esta linha a cada nova versão publicada — é o "carimbo" visível
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, sugiro data + hora de quando o ajuste foi feito.
-const BUILD_STAMP = '2026-08-13 11:00';
+const BUILD_STAMP = '2026-08-13 15:30';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');
@@ -87,6 +87,50 @@ function initWakeLock() {
   });
 }
 
+// ============================================================================
+// Auto-reload por inatividade — pensado pro tablet fixo na geladeira: se
+// alguém mexeu numa aba (Receitas, Compras, um formulário aberto etc.) e
+// esqueceu assim, depois de 15 min sem nenhum toque a página recarrega
+// sozinha e volta pra aba Início (que é a aba marcada como "active" no
+// index.html), deixando o mostrador de volta nas fotos/agenda por padrão.
+// Um reload completo também aproveita pra descartar qualquer estado preso
+// (modal aberto, filtro esquecido) e conferir se há versão nova publicada.
+// ============================================================================
+const IDLE_RELOAD_MS = 15 * 60 * 1000;
+
+function initIdleReload() {
+  let idleTimer = null;
+  function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      window.location.reload();
+    }, IDLE_RELOAD_MS);
+  }
+  ['click', 'touchstart', 'pointerdown', 'keydown', 'input'].forEach((evt) => {
+    document.addEventListener(evt, resetIdleTimer, { passive: true });
+  });
+  resetIdleTimer();
+}
+
+// ============================================================================
+// Web Share Target — deixa compartilhar um link de receita de dentro de
+// QUALQUER app (Chrome, WhatsApp etc.) direto pro nosso app, usando o menu
+// nativo de "Compartilhar" do celular. Funciona quando o app está instalado
+// na tela inicial (Chrome > menu > "Instalar aplicativo"/"Adicionar à tela
+// inicial") — só assim o Android sabe que ele pode aparecer no compartilhar.
+// O manifest.json registra o "share_target"; aqui a gente só lê o link que
+// veio na URL e abre o formulário de receita já com a importação disparada.
+// ============================================================================
+function extractSharedUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const candidates = [params.get('url'), params.get('text'), params.get('title')].filter(Boolean);
+  for (const candidate of candidates) {
+    const match = candidate.match(/https?:\/\/\S+/);
+    if (match) return match[0].replace(/[)>\].,;]+$/, ''); // tira pontuação colada no final do link
+  }
+  return null;
+}
+
 function initSyncStatusIndicator() {
   const el = document.getElementById('syncStatus');
   function update() {
@@ -128,6 +172,7 @@ async function main() {
 
   initSyncStatusIndicator();
   initWakeLock();
+  initIdleReload();
 
   const googleBtn = document.getElementById('googleSignInBtn');
   googleBtn.addEventListener('click', authMod.signIn);
@@ -152,6 +197,16 @@ async function main() {
   // Login/Calendar/Drive são opcionais — não travam o resto do app se falharem.
   authMod.initAuth().catch((e) => console.warn('Google não inicializado:', e));
   photosMod.initPhotoGallery();
+
+  // Se o app foi aberto por causa de um "compartilhar" (Web Share Target),
+  // pula direto pra Receitas com a importação já em andamento.
+  const sharedUrl = extractSharedUrl();
+  if (sharedUrl) {
+    history.replaceState(null, '', window.location.pathname); // evita reimportar num F5
+    const receitasBtn = document.querySelector('.tab-btn[data-tab="receitas"]');
+    if (receitasBtn) receitasBtn.click();
+    recipesMod.openSharedRecipeImport(sharedUrl);
+  }
 
   registerServiceWorker();
 }

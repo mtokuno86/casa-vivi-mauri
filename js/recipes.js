@@ -23,7 +23,7 @@ function ingredientRowHtml(ing = { qty: '', unit: '', name: '' }) {
   `;
 }
 
-function openRecipeForm(existing) {
+function openRecipeForm(existing, prefillImportUrl) {
   const ingredients = existing?.ingredients?.length ? existing.ingredients : [{ qty: '', unit: '', name: '' }];
 
   openModal({
@@ -34,7 +34,7 @@ function openRecipeForm(existing) {
           <div style="background:var(--cream); border-radius:10px; padding:10px; margin-bottom:10px;">
             <label style="margin-top:0;">Importar de um link (opcional)</label>
             <div style="display:flex; gap:6px;">
-              <input type="url" id="importUrlInput" placeholder="Cole o link da receita">
+              <input type="url" id="importUrlInput" placeholder="Cole o link da receita" value="${prefillImportUrl ? prefillImportUrl.replace(/"/g, '&quot;') : ''}">
               <button type="button" id="importBtn" class="btn-secondary">Importar</button>
             </div>
             <div id="importStatus" class="hint" style="margin:4px 0 0;"></div>
@@ -45,7 +45,7 @@ function openRecipeForm(existing) {
         <input type="text" name="title" required value="${existing?.title ? existing.title.replace(/"/g, '&quot;') : ''}">
 
         <label>Link (opcional)</label>
-        <input type="url" name="url" placeholder="https://..." value="${existing?.url || ''}">
+        <input type="url" name="url" placeholder="https://..." value="${existing?.url || (!recipeImportFunctionUrl && prefillImportUrl ? prefillImportUrl : '')}">
 
         <div style="display:flex; gap:8px;">
           <div style="flex:1;">
@@ -154,10 +154,10 @@ function openRecipeForm(existing) {
 
       const importBtn = modalEl.querySelector('#importBtn');
       if (importBtn) {
-        importBtn.addEventListener('click', async () => {
-          const urlInput = modalEl.querySelector('#importUrlInput');
-          const status = modalEl.querySelector('#importStatus');
-          const url = urlInput.value.trim();
+        const urlInput = modalEl.querySelector('#importUrlInput');
+        const status = modalEl.querySelector('#importStatus');
+
+        async function runImport(url) {
           if (!url) return;
           status.textContent = 'Buscando dados da receita…';
           importBtn.disabled = true;
@@ -184,7 +184,13 @@ function openRecipeForm(existing) {
           } finally {
             importBtn.disabled = false;
           }
-        });
+        }
+
+        importBtn.addEventListener('click', () => runImport(urlInput.value.trim()));
+
+        // Veio de um "compartilhar" no celular (Web Share Target) com o link
+        // já preenchido — importa sozinho, sem precisar tocar em "Importar".
+        if (prefillImportUrl) runImport(prefillImportUrl);
       }
 
       const delBtn = modalEl.querySelector('#deleteRecipeBtn');
@@ -411,6 +417,15 @@ export function initRecipes() {
   // do Firestore (nova receita salva, importada, editada em outro aparelho).
   recipesStore.subscribe(() => renderRecipeListNow(listContainer));
   document.getElementById('addRecipeBtn').addEventListener('click', () => openRecipeForm(null));
+}
+
+/**
+ * Abre "Nova receita" já com o link preenchido e a importação disparada
+ * sozinha — usado quando o link chega por "compartilhar" de outro app
+ * (Chrome, WhatsApp etc.), via Web Share Target (ver app.js).
+ */
+export function openSharedRecipeImport(url) {
+  openRecipeForm(null, url);
 }
 
 /** Abre um seletor simples de receita (usado pelo cardápio semanal). */
