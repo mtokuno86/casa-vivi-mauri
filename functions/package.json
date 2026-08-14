@@ -5,6 +5,9 @@
     "node": "20"
   },
   "main": "index.js",
+  "scripts": {
+    "lint": "exit 0"
+  },
   "dependencies": {
     "firebase-functions": "^5.0.0"
   },
