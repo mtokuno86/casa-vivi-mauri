@@ -36,6 +36,81 @@ function firstOf(value) {
   return value;
 }
 
+// ----------------------------------------------------------------------------
+// Detecção/decodificação de charset — corrige acentos e cedilha corrompidos.
+//
+// `Response.text()` do fetch sempre decodifica como UTF-8, mas vários sites
+// de receita brasileiros ainda servem a página em ISO-8859-1/Windows-1252
+// (declarado só na tag <meta charset> do HTML, não no header HTTP). Decodificar
+// bytes Latin-1 como se fossem UTF-8 é exatamente o que gera "Ã§" no lugar de
+// "ç" etc. Por isso lemos os bytes crus e decodificamos com o charset certo.
+// ----------------------------------------------------------------------------
+function detectCharset(buffer, contentTypeHeader) {
+  if (contentTypeHeader) {
+    const m = /charset=([^;]+)/i.exec(contentTypeHeader);
+    if (m) return m[1].trim().toLowerCase();
+  }
+  // Os primeiros bytes do HTML sempre podem ser lidos como latin1 sem erro
+  // (cobre qualquer valor de byte de 0-255), só pra achar a tag <meta charset>.
+  const head = Buffer.from(buffer.slice(0, 4096)).toString('latin1');
+  const metaCharset = /<meta[^>]+charset=["']?\s*([a-z0-9\-]+)/i.exec(head);
+  if (metaCharset) return metaCharset[1].toLowerCase();
+  return 'utf-8';
+}
+
+function normalizeCharsetName(name) {
+  const n = (name || '').toLowerCase();
+  if (n === 'latin1' || n === 'latin-1') return 'iso-8859-1';
+  return n;
+}
+
+function decodeHtml(buffer, contentTypeHeader) {
+  const charset = normalizeCharsetName(detectCharset(buffer, contentTypeHeader));
+  try {
+    return new TextDecoder(charset).decode(buffer);
+  } catch (e) {
+    // Charset não reconhecido pelo TextDecoder — melhor tentar UTF-8 (o mais
+    // comum hoje em dia) do que falhar a importação inteira.
+    return new TextDecoder('utf-8').decode(buffer);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Parser (heurístico) de "2 xícaras de farinha de trigo" -> qty/unit/name.
+// Cobre os padrões mais comuns de receitas em português; o que não bater
+// nenhum padrão conhecido cai inteiro no campo "name" (nada se perde), e o
+// usuário sempre pode ajustar manualmente antes de salvar.
+// ----------------------------------------------------------------------------
+const UNIT_WORDS = [
+  'colher(?:es)? de sopa', 'colher(?:es)? de ch[aá]', 'colher(?:es)? de caf[eé]',
+  'x[ií]caras?', 'x[ií]c', 'gramas?', 'quilos?', 'mililitros?', 'litros?',
+  'unidades?', 'dentes?', 'fatias?', 'pitadas?', 'copos?', 'latas?', 'pacotes?',
+  'kg', 'g', 'ml', 'l', 'un'
+];
+const UNIT_RE = new RegExp(`^(${UNIT_WORDS.join('|')})\\.?(?=\\s|$)`, 'i');
+const FRACTION_CHARS = { '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4', '⅛': '1/8' };
+
+function parseIngredientLine(line) {
+  let text = String(line).trim();
+  Object.entries(FRACTION_CHARS).forEach(([ch, repl]) => { text = text.split(ch).join(repl); });
+
+  const m = /^(\d+(?:[.,]\d+)?(?:\s*\/\s*\d+)?)\s*(.*)$/.exec(text);
+  if (!m) return { qty: '', unit: '', name: text };
+
+  const qty = m[1].replace(',', '.');
+  let rest = m[2].trim();
+
+  const unitMatch = UNIT_RE.exec(rest);
+  let unit = '';
+  if (unitMatch) {
+    unit = unitMatch[0].replace(/\.$/, '').trim();
+    rest = rest.slice(unitMatch[0].length).trim();
+  }
+  rest = rest.replace(/^de\s+/i, '').trim();
+
+  return { qty, unit, name: rest || text };
+}
+
 function extractJsonLdBlocks(html) {
   const blocks = [];
   const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -108,7 +183,8 @@ exports.parseRecipe = onRequest({ cors: true, region: 'southamerica-east1' }, as
       res.status(502).json({ error: `Não foi possível acessar essa página (HTTP ${resp.status}).` });
       return;
     }
-    const html = await resp.text();
+    const rawBytes = await resp.arrayBuffer();
+    const html = decodeHtml(rawBytes, resp.headers.get('content-type'));
     const recipe = extractRecipe(html);
     if (!recipe) {
       res.status(404).json({ error: 'Não encontramos dados estruturados de receita nessa página. Cadastre manualmente.' });
@@ -116,7 +192,7 @@ exports.parseRecipe = onRequest({ cors: true, region: 'southamerica-east1' }, as
     }
 
     const ingredients = (recipe.recipeIngredient || recipe.ingredients || [])
-      .map((line) => ({ qty: '', unit: '', name: String(line).trim() }))
+      .map((line) => parseIngredientLine(line))
       .filter((i) => i.name);
 
     res.json({

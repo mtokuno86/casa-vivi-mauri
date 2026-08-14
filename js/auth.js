@@ -105,12 +105,26 @@ async function ensureGapiClient() {
   gapiReady = true;
 }
 
-function scheduleSilentRefresh(expiresInSec) {
+// Antes, isso tentava renovar o token sozinho a cada ~1h chamando
+// requestAccessToken({prompt:''}) em segundo plano. Na teoria é "silencioso",
+// mas na prática — quando o navegador não consegue completar sem interação
+// (sessão do Google não disponível ali, restrições do navegador etc.) — o
+// Google acaba abrindo uma janela/aba de login mesmo assim. Com o app aberto
+// o dia todo (o computador, o tablet), isso gerava várias abas de login
+// empilhadas ao longo do tempo, sem ninguém por perto pra fechar cada uma.
+// Por isso agora a gente NÃO tenta renovar sozinho: quando o token expira,
+// só volta pro estado "desconectado" (mostra "Conectar Google" de novo) —
+// reconectar vira sempre um clique explícito da pessoa, nunca um pop-up
+// surgindo por conta própria.
+function scheduleExpiry(expiresInSec) {
   clearTimeout(refreshTimer);
-  const refreshInMs = Math.max((expiresInSec - 120) * 1000, 30000); // 2 min antes de expirar
+  const expiresInMs = Math.max((expiresInSec || 0) * 1000, 30000);
   refreshTimer = setTimeout(() => {
-    if (tokenClient) tokenClient.requestAccessToken({ prompt: '' });
-  }, refreshInMs);
+    signedIn = false;
+    accessToken = null;
+    try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* ignora */ }
+    notify();
+  }, expiresInMs);
 }
 
 function applyToken(token, expiresInSec) {
@@ -119,7 +133,7 @@ function applyToken(token, expiresInSec) {
   signedIn = true;
   const expiresAtMs = Date.now() + (expiresInSec || 3300) * 1000;
   saveTokenToStorage(token, expiresAtMs);
-  scheduleSilentRefresh(expiresInSec || 3300);
+  scheduleExpiry(expiresInSec || 3300);
   notify();
   fetchUserInfo();
 }

@@ -15,7 +15,7 @@ import { initDb, getMode } from './db.js';
 // Atualize esta linha a cada nova versão publicada — é o "carimbo" visível
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, sugiro data + hora de quando o ajuste foi feito.
-const BUILD_STAMP = '2026-08-13 15:30';
+const BUILD_STAMP = '2026-08-14 19:00';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');

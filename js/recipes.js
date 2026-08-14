@@ -260,6 +260,14 @@ const TIME_FILTER_OPTIONS = [
 // persistir entre sessões, é só pra facilitar a busca no momento).
 const filterState = { protein: '', cuisine: '', difficulty: '', maxMinutes: '', equipment: new Set() };
 
+const SORT_OPTIONS = [
+  ['alpha', 'Alfabética'],
+  ['difficulty', 'Dificuldade'],
+  ['time', 'Tempo de preparo']
+];
+const DIFFICULTY_ORDER = { facil: 0, media: 1, dificil: 2 };
+let sortState = 'alpha';
+
 /** Extrai um número aproximado de minutos de um texto livre como "30 min" ou "1h30". */
 function parseMinutes(str) {
   if (!str) return null;
@@ -294,9 +302,41 @@ function recipeMatchesFilters(r) {
   return true;
 }
 
+function sortRecipes(list) {
+  const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', 'pt-BR');
+  const arr = [...list];
+  if (sortState === 'difficulty') {
+    arr.sort((a, b) => {
+      const da = DIFFICULTY_ORDER[a.difficulty] ?? 99;
+      const db = DIFFICULTY_ORDER[b.difficulty] ?? 99;
+      return da - db || byTitle(a, b);
+    });
+  } else if (sortState === 'time') {
+    arr.sort((a, b) => {
+      const ma = parseMinutes(a.prepTime);
+      const mb = parseMinutes(b.prepTime);
+      if (ma === null && mb === null) return byTitle(a, b);
+      if (ma === null) return 1; // sem tempo informado vai pro final
+      if (mb === null) return -1;
+      return ma - mb || byTitle(a, b);
+    });
+  } else {
+    arr.sort(byTitle);
+  }
+  return arr;
+}
+
 function renderFilterBar(container, onChange) {
   container.innerHTML = `
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+      <div style="flex:1; min-width:140px;">
+        <label>Ordenar por</label>
+        <select id="sortSelect">
+          ${SORT_OPTIONS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
       <div style="flex:1; min-width:140px;">
         <label>Proteína</label>
         <select id="filterProtein">
@@ -334,10 +374,14 @@ function renderFilterBar(container, onChange) {
     <button type="button" id="clearFiltersBtn" class="btn-secondary" style="margin-top:10px;">Limpar filtros</button>
   `;
 
+  const sortSel = container.querySelector('#sortSelect');
   const proteinSel = container.querySelector('#filterProtein');
   const cuisineSel = container.querySelector('#filterCuisine');
   const difficultySel = container.querySelector('#filterDifficulty');
   const timeSel = container.querySelector('#filterTime');
+
+  sortSel.value = sortState;
+  sortSel.addEventListener('change', () => { sortState = sortSel.value; onChange(); });
 
   proteinSel.addEventListener('change', () => { filterState.protein = proteinSel.value; onChange(); });
   cuisineSel.addEventListener('change', () => { filterState.cuisine = cuisineSel.value; onChange(); });
@@ -396,7 +440,7 @@ function renderRecipeListNow(container) {
     container.innerHTML = '<p class="hint">Nenhuma receita ainda. Toque em "+ Nova receita" para cadastrar.</p>';
     return;
   }
-  const filtered = recipes.filter(recipeMatchesFilters);
+  const filtered = sortRecipes(recipes.filter(recipeMatchesFilters));
   container.innerHTML = filtered.length
     ? filtered.map(recipeCardHtml).join('')
     : '<p class="hint">Nenhuma receita bate com esses filtros. Tente afrouxar algum critério.</p>';
