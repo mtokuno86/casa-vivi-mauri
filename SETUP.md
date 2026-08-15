@@ -155,17 +155,28 @@ cartão é exigido mesmo assim.
    ```bash
    firebase deploy --only functions
    ```
-4. Ao final, o terminal mostra a URL da função, parecida com:
+4. Ao final, o terminal mostra as URLs das duas funções (`parseRecipe` e
+   `searchRecipes`), parecidas com:
    ```
    https://southamerica-east1-casa-vivi-mauri.cloudfunctions.net/parseRecipe
+   https://southamerica-east1-casa-vivi-mauri.cloudfunctions.net/searchRecipes
    ```
-5. Cole essa URL em `js/config.js`, na constante `recipeImportFunctionUrl`.
+5. Cole a URL de `parseRecipe` em `js/config.js`, na constante
+   `recipeImportFunctionUrl`, e a de `searchRecipes` na constante
+   `recipeSearchFunctionUrl` (mesmo arquivo, logo abaixo).
 6. Publique de novo (redeploy do hosting, ou reenvie os arquivos alterados no
    GitHub Pages).
 
-Teste: aba **Receitas** → "+ Nova receita" → cole um link de receita no campo
-"Importar de um link" → "Importar". Quando o site não tiver os dados
-estruturados que a função procura, ela avisa e é só preencher manualmente.
+Teste "Importar de link": aba **Receitas** → "+ Nova receita" → cole um link
+de receita no campo "Importar de um link" → "Importar". Quando o site não
+tiver os dados estruturados que a função procura, ela avisa e é só preencher
+manualmente.
+
+Teste "Buscar por ingrediente": aba **Receitas** → botão "🔍 Buscar por
+ingrediente" → digite um ingrediente (ex: "frango") → escolha um resultado
+para importar. Por enquanto busca em dois sites (Panelaterapia e Receitas de
+Mãe) — veja o comentário no topo de `searchRecipes` em `functions/index.js`
+para a lista atualizada e o porquê desses dois.
 
 ---
 

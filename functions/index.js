@@ -158,6 +158,104 @@ function instructionsToText(instructions) {
   return '';
 }
 
+// ----------------------------------------------------------------------------
+// Busca por ingrediente em sites "mapeados" — usada pela tela de Receitas
+// para descobrir receitas novas sem depender só da busca (fraca) do Tudo
+// Gostoso.
+//
+// Cobertura: só sites cuja página de resultados de busca já vem pronta no
+// HTML (sem depender de JavaScript no navegador) e cujos Termos de Uso não
+// proíbem explicitamente coleta automatizada. Testamos vários sites grandes
+// (Tudo Gostoso, CyberCook, Receiteria, TudoReceitas, ComidaEReceitas,
+// Receitas Nestlé, Panelinha) e nenhum deles devolve resultados via busca
+// simples — todos renderizam a lista via JS. Os dois abaixo são blogs
+// WordPress e usam o padrão de busca `?s=termo`, comum a esse tipo de site;
+// novos blogs do mesmo tipo tendem a funcionar com o mesmo parser, sem
+// precisar de código específico por site.
+// ----------------------------------------------------------------------------
+const SEARCH_SITES = {
+  panelaterapia: {
+    label: 'Panelaterapia',
+    searchUrl: (q) => `https://panelaterapia.com/?s=${encodeURIComponent(q)}`
+  },
+  receitasdemae: {
+    label: 'Receitas de Mãe',
+    searchUrl: (q) => `https://www.receitasdemae.com.br/?s=${encodeURIComponent(q)}`
+  }
+};
+
+// Padrão comum a temas WordPress: o título de cada post nos resultados de
+// busca fica dentro de um heading (h1-h4) que envolve um único link para a
+// página do post — ex: <h3 class="entry-title"><a href="...">Título</a></h3>.
+// Como cada busca só lista posts (não itens de menu), isso captura os
+// resultados sem precisar saber o nome exato da classe CSS do tema.
+const WP_RESULT_RE = /<h[1-4][^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*([^<]+?)\s*<\/a>\s*<\/h[1-4]>/gi;
+
+// Links de menu/navegação/rodapé (categorias, tags, páginas institucionais)
+// às vezes também caem dentro de um <h1-4>...<a> — esse filtro tira esse
+// tipo de resultado, deixando só o que parece post/receita de verdade.
+const NON_POST_PATH_RE = /\/(categoria|category|tag|tags|autor|author|page|paged|feed|wp-login|wp-content|wp-admin|cookie-policy|politica-de-cookies|politica-de-privacidade|termos?-de-uso|quem-somos|contato|fale-conosco|sobre)(\/|$|\?)/i;
+const NAV_TITLE_RE = /^(in[ií]cio|home|receitas|v[ií]deos|viagens|variedades|sobre|contato|login|menu|buscar|procurar|search|mais recente)$/i;
+
+function decodeHtmlEntities(str) {
+  return String(str)
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;|&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractWpSearchResults(html, siteKey) {
+  const results = [];
+  const seen = new Set();
+  let m;
+  WP_RESULT_RE.lastIndex = 0;
+  while ((m = WP_RESULT_RE.exec(html)) !== null) {
+    const url = m[1];
+    const title = decodeHtmlEntities(m[2]).trim();
+    if (!url || !title || seen.has(url)) continue;
+    if (NON_POST_PATH_RE.test(url) || NAV_TITLE_RE.test(title)) continue;
+    seen.add(url);
+    results.push({ site: siteKey, title, url });
+    if (results.length >= 8) break; // não precisa de mais que isso por site
+  }
+  return results;
+}
+
+async function searchOneSite(siteKey, query) {
+  const site = SEARCH_SITES[siteKey];
+  try {
+    const resp = await fetch(site.searchUrl(query), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CasaVMBot/1.0; +https://mtokuno86.github.io/casa-vivi-mauri/)' },
+      redirect: 'follow'
+    });
+    if (!resp.ok) return { site: siteKey, label: site.label, results: [], error: `HTTP ${resp.status}` };
+    const rawBytes = await resp.arrayBuffer();
+    const html = decodeHtml(rawBytes, resp.headers.get('content-type'));
+    return { site: siteKey, label: site.label, results: extractWpSearchResults(html, siteKey) };
+  } catch (e) {
+    console.error(`Erro buscando em ${siteKey}:`, e);
+    return { site: siteKey, label: site.label, results: [], error: 'Falha ao acessar o site' };
+  }
+}
+
+exports.searchRecipes = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
+  const q = req.query.q;
+  if (!q || typeof q !== 'string' || !q.trim()) {
+    res.status(400).json({ error: 'Passe o ingrediente/termo no parâmetro "q".' });
+    return;
+  }
+  const requestedSite = typeof req.query.site === 'string' ? req.query.site : null;
+  const siteKeys = requestedSite && SEARCH_SITES[requestedSite] ? [requestedSite] : Object.keys(SEARCH_SITES);
+
+  const bySite = await Promise.all(siteKeys.map((key) => searchOneSite(key, q.trim())));
+  res.json({ query: q.trim(), sites: bySite });
+});
+
 exports.parseRecipe = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
   const url = req.query.url;
   if (!url || typeof url !== 'string') {

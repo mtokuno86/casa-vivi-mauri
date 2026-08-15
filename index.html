@@ -92,7 +92,10 @@
     <section id="view-receitas" class="view">
       <div class="section-header">
         <h2>Receitas</h2>
-        <button id="addRecipeBtn" class="btn-primary">+ Nova receita</button>
+        <div style="display:flex; gap:8px;">
+          <button id="searchIngredientBtn" class="btn-secondary">🔍 Buscar por ingrediente</button>
+          <button id="addRecipeBtn" class="btn-primary">+ Nova receita</button>
+        </div>
       </div>
       <div id="recipeFilters" class="card recipe-filters" style="margin-bottom:14px;"></div>
       <div id="recipeList" class="recipe-list"></div>

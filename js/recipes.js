@@ -7,7 +7,7 @@
 // ============================================================================
 import { createStore } from './store.js';
 import { openModal } from './modal.js';
-import { recipeImportFunctionUrl } from './config.js';
+import { recipeImportFunctionUrl, recipeSearchFunctionUrl } from './config.js';
 import { PROTEINS, CUISINES, EQUIPMENT_OPTIONS, guessFacets } from './recipeFacets.js';
 
 export const recipesStore = createStore('recipes');
@@ -453,6 +453,85 @@ function renderRecipeListNow(container) {
   });
 }
 
+// ============================================================================
+// Busca por ingrediente em sites mapeados (Panelaterapia, Receitas de Mãe —
+// ver functions/index.js "searchRecipes" para a lista completa e o porquê
+// desses dois). Mostra os resultados de cada site lado a lado; ao escolher
+// um, reaproveita o mesmo fluxo de "Importar de link" de sempre — a pessoa
+// sempre revisa os campos antes de salvar.
+// ============================================================================
+function ingredientSearchResultsHtml(sites) {
+  const withResults = sites.filter((s) => s.results.length);
+  if (!withResults.length) {
+    const anyError = sites.some((s) => s.error);
+    return `<p class="hint">Nenhuma receita encontrada${anyError ? ' (algum site pode estar temporariamente fora do ar)' : ''}. Tente outro termo.</p>`;
+  }
+  return withResults.map((s) => `
+    <div style="margin-bottom:12px;">
+      <strong style="font-size:0.85rem;">${s.label}</strong>
+      <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
+        ${s.results.map((r) => `
+          <button type="button" class="btn-secondary pick-search-result" data-url="${r.url.replace(/"/g, '&quot;')}" style="text-align:left;">${r.title}</button>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openIngredientSearch() {
+  openModal({
+    title: 'Buscar por ingrediente',
+    bodyHtml: `
+      <div style="display:flex; gap:6px;">
+        <input type="text" id="ingredientSearchInput" placeholder="Ex: frango, camarão, abobrinha...">
+        <button type="button" id="ingredientSearchBtn" class="btn-primary">Buscar</button>
+      </div>
+      <p class="hint" style="margin-top:6px;">Busca em 2 sites mapeados por enquanto (Panelaterapia, Receitas de Mãe). Escolha um resultado para importar — você revisa tudo antes de salvar.</p>
+      <div id="ingredientSearchResults" style="margin-top:10px;"></div>
+      <div class="modal-actions">
+        <button type="button" id="closeSearchBtn" class="btn-secondary">Fechar</button>
+      </div>
+    `,
+    onMount: (modalEl, close) => {
+      const input = modalEl.querySelector('#ingredientSearchInput');
+      const btn = modalEl.querySelector('#ingredientSearchBtn');
+      const results = modalEl.querySelector('#ingredientSearchResults');
+
+      async function runSearch() {
+        const q = input.value.trim();
+        if (!q) return;
+        results.innerHTML = '<p class="hint">Buscando…</p>';
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`${recipeSearchFunctionUrl}?q=${encodeURIComponent(q)}`);
+          const data = await resp.json();
+          if (!resp.ok) {
+            results.innerHTML = `<p class="hint">${data.error || 'Erro na busca.'}</p>`;
+            return;
+          }
+          results.innerHTML = ingredientSearchResultsHtml(data.sites || []);
+          results.querySelectorAll('.pick-search-result').forEach((r) => {
+            r.addEventListener('click', () => {
+              close();
+              openRecipeForm(null, r.dataset.url);
+            });
+          });
+        } catch (e) {
+          console.error(e);
+          results.innerHTML = '<p class="hint">Erro ao buscar. Tente novamente.</p>';
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      btn.addEventListener('click', runSearch);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } });
+      modalEl.querySelector('#closeSearchBtn').addEventListener('click', close);
+      input.focus();
+    }
+  });
+}
+
 export function initRecipes() {
   const listContainer = document.getElementById('recipeList');
   const filtersContainer = document.getElementById('recipeFilters');
@@ -461,6 +540,15 @@ export function initRecipes() {
   // do Firestore (nova receita salva, importada, editada em outro aparelho).
   recipesStore.subscribe(() => renderRecipeListNow(listContainer));
   document.getElementById('addRecipeBtn').addEventListener('click', () => openRecipeForm(null));
+
+  const searchBtn = document.getElementById('searchIngredientBtn');
+  if (searchBtn) {
+    if (recipeSearchFunctionUrl) {
+      searchBtn.addEventListener('click', openIngredientSearch);
+    } else {
+      searchBtn.style.display = 'none';
+    }
+  }
 }
 
 /**
