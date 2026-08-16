@@ -23,7 +23,7 @@ function ingredientRowHtml(ing = { qty: '', unit: '', name: '' }) {
   `;
 }
 
-function openRecipeForm(existing, prefillImportUrl) {
+function openRecipeForm(existing, prefillImportUrl, prefillTitle) {
   const ingredients = existing?.ingredients?.length ? existing.ingredients : [{ qty: '', unit: '', name: '' }];
 
   openModal({
@@ -42,10 +42,10 @@ function openRecipeForm(existing, prefillImportUrl) {
         ` : ''}
 
         <label>Título</label>
-        <input type="text" name="title" required value="${existing?.title ? existing.title.replace(/"/g, '&quot;') : ''}">
+        <input type="text" name="title" required value="${(existing?.title || prefillTitle || '').replace(/"/g, '&quot;')}">
 
         <label>Link (opcional)</label>
-        <input type="url" name="url" placeholder="https://..." value="${existing?.url || (!recipeImportFunctionUrl && prefillImportUrl ? prefillImportUrl : '')}">
+        <input type="url" name="url" placeholder="https://..." value="${(existing?.url || prefillImportUrl || '').replace(/"/g, '&quot;')}">
 
         <div style="display:flex; gap:8px;">
           <div style="flex:1;">
@@ -165,7 +165,9 @@ function openRecipeForm(existing, prefillImportUrl) {
             const resp = await fetch(`${recipeImportFunctionUrl}?url=${encodeURIComponent(url)}`);
             const data = await resp.json();
             if (!resp.ok) {
-              status.textContent = data.error || 'Não foi possível importar essa receita — cadastre manualmente.';
+              status.textContent = prefillTitle
+                ? (data.error || 'Esse site não tem dados estruturados para importar automaticamente.') + ' Já deixamos o título e o link preenchidos — abra o link ao lado numa aba e complete ingredientes/modo de preparo manualmente.'
+                : (data.error || 'Não foi possível importar essa receita — cadastre manualmente.');
               return;
             }
             if (data.title) modalEl.querySelector('[name="title"]').value = data.title;
@@ -177,7 +179,9 @@ function openRecipeForm(existing, prefillImportUrl) {
               wrap.innerHTML = data.ingredients.map((i) => ingredientRowHtml(i)).join('');
             }
             applyGuess(true);
-            status.textContent = 'Importado — revise os campos (inclusive os filtros de busca sugeridos) antes de salvar. A extração automática pode não ser 100% exata.';
+            status.textContent = data.approximate
+              ? 'Importado por varredura de texto (esse site não tem dados estruturados) — confira com atenção, principalmente o modo de preparo, que pode ter vindo incompleto ou vazio.'
+              : 'Importado — revise os campos (inclusive os filtros de busca sugeridos) antes de salvar. A extração automática pode não ser 100% exata.';
           } catch (e) {
             console.error(e);
             status.textContent = 'Erro ao importar. Cadastre manualmente.';
@@ -471,7 +475,7 @@ function ingredientSearchResultsHtml(sites) {
       <strong style="font-size:0.85rem;">${s.label}</strong>
       <div style="display:flex; flex-direction:column; gap:6px; margin-top:6px;">
         ${s.results.map((r) => `
-          <button type="button" class="btn-secondary pick-search-result" data-url="${r.url.replace(/"/g, '&quot;')}" style="text-align:left;">${r.title}</button>
+          <button type="button" class="btn-secondary pick-search-result" data-url="${r.url.replace(/"/g, '&quot;')}" data-title="${r.title.replace(/"/g, '&quot;')}" style="text-align:left;">${r.title}</button>
         `).join('')}
       </div>
     </div>
@@ -513,7 +517,13 @@ function openIngredientSearch() {
           results.querySelectorAll('.pick-search-result').forEach((r) => {
             r.addEventListener('click', () => {
               close();
-              openRecipeForm(null, r.dataset.url);
+              // Já sabemos o título e o link pela própria busca — passa os
+              // dois adiante, assim o formulário não fica vazio mesmo se o
+              // site não tiver dados estruturados pra importação automática
+              // (ex: Panelaterapia não usa schema.org/Recipe nas receitas;
+              // só o Título e o Link vêm prontos, o resto é preenchido lendo
+              // a página, que abre pelo link "Ver receita original").
+              openRecipeForm(null, r.dataset.url, r.dataset.title);
             });
           });
         } catch (e) {

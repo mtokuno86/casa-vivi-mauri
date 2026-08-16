@@ -20,6 +20,12 @@ let userInfo = null; // { email, name, picture } — carregado após login
 const listeners = new Set();
 
 const TOKEN_STORAGE_KEY = 'casa-vm:googleToken';
+// sessionStorage (não localStorage!) — existe só enquanto a aba/janela do
+// navegador continua aberta, mesmo sobrevivendo a um location.reload(). É
+// isso que permite "tentar reconectar 1x por sessão de aba", sem repetir a
+// cada reload automático (ver initIdleReload em app.js, que recarrega a
+// página a cada 15 min de inatividade).
+const SILENT_RECONNECT_KEY = 'casa-vm:silentReconnectTried';
 
 function saveTokenToStorage(token, expiresAtMs) {
   try {
@@ -174,6 +180,22 @@ export async function initAuth() {
   // se já houve consentimento antes. Em navegadores mobile/PWA isso nem
   // sempre é 100% silencioso — é uma limitação do próprio Google Identity
   // Services, não do app.
+  //
+  // MAS só tenta 1x por sessão de aba (sessionStorage, não localStorage).
+  // Motivo: app.js recarrega a página sozinho a cada 15 min de inatividade
+  // (initIdleReload), e cada reload chama initAuth() de novo. Sem esse
+  // limite, um computador/tablet que fica ligado (e parado) a noite toda
+  // dispara essa tentativa a cada 15 min — e quando o Google não consegue
+  // completar 100% em silêncio, ele abre uma aba/janela de login em vez de
+  // falhar quieto. Foi exatamente isso que gerou "dezenas de abas" pedindo
+  // login de um dia pro outro. Fechar e reabrir a aba/navegador limpa o
+  // sessionStorage, então a tentativa silenciosa volta a acontecer
+  // normalmente na próxima vez que o app for aberto de verdade.
+  let alreadyTried = false;
+  try { alreadyTried = sessionStorage.getItem(SILENT_RECONNECT_KEY) === 'true'; } catch (e) { /* ignora */ }
+  if (alreadyTried) return;
+  try { sessionStorage.setItem(SILENT_RECONNECT_KEY, 'true'); } catch (e) { /* ignora */ }
+
   tokenClient.requestAccessToken({ prompt: '' });
 }
 

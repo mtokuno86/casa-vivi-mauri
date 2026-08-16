@@ -49,7 +49,7 @@ export const householdName = "Casa Vivi & Mauri";
 // link). Depois de fazer o deploy (veja SETUP.md), cole a URL aqui, algo como:
 // "https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/parseRecipe"
 // Deixe vazio para desativar o botão "Importar de link" (fica só o manual).
-export const recipeImportFunctionUrl = " https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/parseRecipe";
+export const recipeImportFunctionUrl = "";
 
 // URL da Cloud Function "searchRecipes" (busca de receitas por ingrediente em
 // sites mapeados — Panelaterapia e Receitas de Mãe, por enquanto). Fica no
@@ -57,4 +57,4 @@ export const recipeImportFunctionUrl = " https://southamerica-east1-casa-a-casa-
 // base trocando só o nome no final:
 // "https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/searchRecipes"
 // Deixe vazio para desativar o botão "Buscar por ingrediente".
-export const recipeSearchFunctionUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/searchRecipes";
+export const recipeSearchFunctionUrl = "";

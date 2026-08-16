@@ -14,8 +14,9 @@ import { initDb, getMode } from './db.js';
 
 // Atualize esta linha a cada nova versão publicada — é o "carimbo" visível
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
-// Formato livre, sugiro data + hora de quando o ajuste foi feito.
-const BUILD_STAMP = '2026-08-15 10:00';
+// Formato livre, mas sempre no horário de São Paulo (UTC-3, sem horário de
+// verão desde 2019) — não no horário UTC/local de quem estiver editando.
+const BUILD_STAMP = '2026-08-16 09:11';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');

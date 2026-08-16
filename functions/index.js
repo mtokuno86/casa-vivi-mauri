@@ -159,6 +159,90 @@ function instructionsToText(instructions) {
 }
 
 // ----------------------------------------------------------------------------
+// Extração aproximada (fallback) para páginas SEM schema.org/Recipe — ex:
+// Panelaterapia, que escreve as receitas como texto corrido com listas, sem
+// o "cartão de receita" estruturado que o extractRecipe() de cima procura.
+//
+// Estratégia: acha o primeiro heading (h1-h4) cujo texto contenha
+// "ingrediente", e pega a PRÓXIMA lista (<ul> ou <ol>) que aparecer antes do
+// heading seguinte — cada <li> dessa lista vira um ingrediente (reaproveita
+// o mesmo parseIngredientLine de cima pra separar qtd/unidade/nome). Repete
+// a mesma ideia pra "modo de preparo" tentando achar um heading equivalente.
+//
+// É heurístico e pode falhar em sites com estrutura muito diferente — por
+// isso sempre volta pro app com approximate:true, pra deixar claro que
+// precisa de mais atenção na revisão do que uma importação via schema.org.
+// ----------------------------------------------------------------------------
+function stripTags(html) {
+  return String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function extractListItemsAfterHeading(html, headingWordsRe, preferOrdered) {
+  const headingRe = new RegExp(`<h[1-4][^>]*>((?:(?!</h[1-4]>)[\\s\\S])*?)<\\/h[1-4]>`, 'gi');
+  let hMatch;
+  while ((hMatch = headingRe.exec(html)) !== null) {
+    const headingText = stripTags(hMatch[1]);
+    if (!headingWordsRe.test(headingText)) continue;
+
+    const afterHeading = html.slice(headingRe.lastIndex);
+    const nextHeadingIdx = afterHeading.search(/<h[1-4][^>]*>/i);
+    const window = nextHeadingIdx === -1 ? afterHeading : afterHeading.slice(0, nextHeadingIdx);
+
+    const tagsInOrder = preferOrdered ? ['ol', 'ul'] : ['ul', 'ol'];
+    for (const tag of tagsInOrder) {
+      const listRe = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
+      const listMatch = listRe.exec(window);
+      if (!listMatch) continue;
+      const items = [];
+      const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+      let liMatch;
+      while ((liMatch = liRe.exec(listMatch[1])) !== null) {
+        const text = decodeHtmlEntities(stripTags(liMatch[1])).trim();
+        if (text) items.push(text);
+      }
+      if (items.length) return items;
+    }
+  }
+  return [];
+}
+
+function extractFallbackTitle(html) {
+  const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+  if (h1) {
+    const text = decodeHtmlEntities(stripTags(h1[1])).trim();
+    if (text) return text;
+  }
+  const og = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i.exec(html);
+  if (og) return decodeHtmlEntities(og[1]).trim();
+  const titleTag = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  if (titleTag) return decodeHtmlEntities(stripTags(titleTag[1])).trim();
+  return '';
+}
+
+const INGREDIENT_HEADING_RE = /ingrediente/i;
+const INSTRUCTIONS_HEADING_RE = /modo de preparo|instru[çc][ãa]o|passo a passo|como (fazer|preparar)/i;
+
+// Blogs escrevem listas como frases ("4 filés de frango;", "2 ovos;",
+// terminando a última com "."), diferente de um cartão de receita — sem
+// isso, esse ";"/"." final sobra grudado no nome do ingrediente/passo.
+function stripTrailingPunctuation(text) {
+  return String(text).replace(/[;,.]+\s*$/, '').trim();
+}
+
+function extractFallbackRecipe(html) {
+  const title = extractFallbackTitle(html);
+  const ingredientLines = extractListItemsAfterHeading(html, INGREDIENT_HEADING_RE, false);
+  const ingredients = ingredientLines
+    .map((line) => parseIngredientLine(line))
+    .map((i) => ({ ...i, name: stripTrailingPunctuation(i.name) }))
+    .filter((i) => i.name);
+  const instructionSteps = extractListItemsAfterHeading(html, INSTRUCTIONS_HEADING_RE, true)
+    .map(stripTrailingPunctuation);
+  const instructions = instructionSteps.length ? instructionsToText(instructionSteps) : '';
+  return { title, ingredients, instructions };
+}
+
+// ----------------------------------------------------------------------------
 // Busca por ingrediente em sites "mapeados" — usada pela tela de Receitas
 // para descobrir receitas novas sem depender só da busca (fraca) do Tudo
 // Gostoso.
@@ -172,6 +256,17 @@ function instructionsToText(instructions) {
 // WordPress e usam o padrão de busca `?s=termo`, comum a esse tipo de site;
 // novos blogs do mesmo tipo tendem a funcionar com o mesmo parser, sem
 // precisar de código específico por site.
+//
+// Atenção Panelaterapia: a busca funciona (título + link), mas as páginas
+// de receita do Panelaterapia NÃO têm dados estruturados schema.org/Recipe
+// (conferido diretamente — a página é só texto corrido com listas, sem o
+// bloco de "cartão de receita" que a `parseRecipe` procura). Por isso a
+// `parseRecipe` cai no fallback de varredura de texto (ver
+// extractFallbackRecipe mais abaixo) pra esse tipo de site: acha a lista
+// logo depois de um heading "ingredientes" e usa como ingredientes — é
+// aproximado (sem tempo/rendimento/dificuldade, e às vezes sem "modo de
+// preparo" também, dependendo de como o site escreveu o texto), então
+// sempre volta marcado como approximate:true pro app avisar a pessoa.
 // ----------------------------------------------------------------------------
 const SEARCH_SITES = {
   panelaterapia: {
@@ -197,6 +292,20 @@ const WP_RESULT_RE = /<h[1-4][^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>\s*([^<]+?)\s*<
 const NON_POST_PATH_RE = /\/(categoria|category|tag|tags|autor|author|page|paged|feed|wp-login|wp-content|wp-admin|cookie-policy|politica-de-cookies|politica-de-privacidade|termos?-de-uso|quem-somos|contato|fale-conosco|sobre)(\/|$|\?)/i;
 const NAV_TITLE_RE = /^(in[ií]cio|home|receitas|v[ií]deos|viagens|variedades|sobre|contato|login|menu|buscar|procurar|search|mais recente)$/i;
 
+// Entidades nomeadas mais comuns em português (a maioria dos sites já manda
+// o acento como UTF-8 literal depois do decodeHtml() lá em cima, mas alguns
+// plugins/editores ainda escrevem como entidade nomeada — sem isso, "&iacute;"
+// aparecia literal no texto em vez de virar "í").
+const NAMED_ENTITIES = {
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú',
+  acirc: 'â', ecirc: 'ê', ocirc: 'ô', Acirc: 'Â', Ecirc: 'Ê', Ocirc: 'Ô',
+  atilde: 'ã', otilde: 'õ', Atilde: 'Ã', Otilde: 'Õ',
+  ccedil: 'ç', Ccedil: 'Ç', agrave: 'à', Agrave: 'À',
+  ndash: '–', mdash: '—', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“'
+};
+const NAMED_ENTITY_RE = new RegExp(`&(${Object.keys(NAMED_ENTITIES).join('|')});`, 'g');
+
 function decodeHtmlEntities(str) {
   return String(str)
     .replace(/&amp;/g, '&')
@@ -204,20 +313,31 @@ function decodeHtmlEntities(str) {
     .replace(/&#039;|&apos;/g, "'")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(NAMED_ENTITY_RE, (_, name) => NAMED_ENTITIES[name])
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
 }
 
-function extractWpSearchResults(html, siteKey) {
+// `href` num HTML costuma vir relativo (ex: "/receitas/frango-ao-mel/"), não
+// absoluto — resolvemos contra a URL de verdade da página buscada (depois de
+// seguir redirects) pra sempre devolver um link completo e clicável.
+function extractWpSearchResults(html, siteKey, baseUrl) {
   const results = [];
   const seen = new Set();
   let m;
   WP_RESULT_RE.lastIndex = 0;
   while ((m = WP_RESULT_RE.exec(html)) !== null) {
-    const url = m[1];
+    const rawHref = m[1];
     const title = decodeHtmlEntities(m[2]).trim();
-    if (!url || !title || seen.has(url)) continue;
+    if (!rawHref || !title) continue;
+    let url;
+    try {
+      url = new URL(rawHref, baseUrl).toString();
+    } catch (e) {
+      continue; // href impossível de resolver — ignora esse resultado
+    }
+    if (seen.has(url)) continue;
     if (NON_POST_PATH_RE.test(url) || NAV_TITLE_RE.test(title)) continue;
     seen.add(url);
     results.push({ site: siteKey, title, url });
@@ -229,14 +349,18 @@ function extractWpSearchResults(html, siteKey) {
 async function searchOneSite(siteKey, query) {
   const site = SEARCH_SITES[siteKey];
   try {
-    const resp = await fetch(site.searchUrl(query), {
+    const searchUrl = site.searchUrl(query);
+    const resp = await fetch(searchUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CasaVMBot/1.0; +https://mtokuno86.github.io/casa-vivi-mauri/)' },
       redirect: 'follow'
     });
     if (!resp.ok) return { site: siteKey, label: site.label, results: [], error: `HTTP ${resp.status}` };
     const rawBytes = await resp.arrayBuffer();
     const html = decodeHtml(rawBytes, resp.headers.get('content-type'));
-    return { site: siteKey, label: site.label, results: extractWpSearchResults(html, siteKey) };
+    // resp.url reflete a URL final depois de qualquer redirect — mais
+    // confiável que reusar a URL de busca original como base de resolução.
+    const baseUrl = resp.url || searchUrl;
+    return { site: siteKey, label: site.label, results: extractWpSearchResults(html, siteKey, baseUrl) };
   } catch (e) {
     console.error(`Erro buscando em ${siteKey}:`, e);
     return { site: siteKey, label: site.label, results: [], error: 'Falha ao acessar o site' };
@@ -285,7 +409,28 @@ exports.parseRecipe = onRequest({ cors: true, region: 'southamerica-east1' }, as
     const html = decodeHtml(rawBytes, resp.headers.get('content-type'));
     const recipe = extractRecipe(html);
     if (!recipe) {
-      res.status(404).json({ error: 'Não encontramos dados estruturados de receita nessa página. Cadastre manualmente.' });
+      // Sem schema.org/Recipe — tenta a varredura de texto (heading
+      // "ingredientes" + lista logo abaixo) antes de desistir e mandar pro
+      // cadastro 100% manual. Cobre sites como o Panelaterapia, que escreve
+      // a receita como texto corrido em vez de usar um cartão estruturado.
+      const fallback = extractFallbackRecipe(html);
+      if (fallback.ingredients.length || fallback.title) {
+        res.json({
+          title: fallback.title,
+          image: '',
+          prepTime: null,
+          cookTime: null,
+          totalTime: null,
+          yield: '',
+          difficulty: null,
+          ingredients: fallback.ingredients,
+          instructions: fallback.instructions,
+          sourceUrl: parsedUrl.toString(),
+          approximate: true
+        });
+        return;
+      }
+      res.status(404).json({ error: 'Não encontramos dados de receita nessa página. Cadastre manualmente.' });
       return;
     }
 
