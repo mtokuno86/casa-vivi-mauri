@@ -150,21 +150,39 @@ async function ensureGapiClient() {
 // Nunca abre nada visível: ou funciona em silêncio, ou falha com um status
 // que diz exatamente o que fazer.
 //
+// fetchAccessTokenForDevice é a chamada "crua", sem side-effects — usada
+// tanto pela renovação em segundo plano quanto pelo polling logo após abrir
+// a popup de conexão. Importante: durante o polling, um 404 é NORMAL (a
+// popup ainda não terminou de trocar o código pelo token), não significa
+// "conexão revogada" — por isso quem decide o que fazer com um 404 é cada
+// chamador, não essa função.
+// ----------------------------------------------------------------------------
+async function fetchAccessTokenForDevice(deviceId) {
+  const resp = await fetch(`${getGoogleAccessTokenUrl}?deviceId=${encodeURIComponent(deviceId)}`);
+  if (resp.ok) return { ok: true, data: await resp.json() };
+  return { ok: false, status: resp.status };
+}
+
 // Retorna: 'ok' (conectado), 'revoked' (precisa reconectar manualmente),
 // 'no-device' (esse aparelho nunca fez a conexão persistente) ou 'error'
 // (falha de rede/servidor — vale tentar de novo em breve).
-// ----------------------------------------------------------------------------
+//
+// Usada só pra renovação de uma conexão JÁ ESTABELECIDA (scheduleExpiry,
+// initAuth) — aqui um 404/401 realmente significa "essa conexão não existe
+// mais" (revogada, ou o registro sumiu), então faz sentido limpar o
+// deviceId local. NÃO é usada durante o polling pós-popup (ver
+// pollAfterPopup), justamente porque lá um 404 é esperado e não deve
+// apagar nada.
 async function silentRefreshViaBackend() {
   const deviceId = localStorage.getItem(DEVICE_ID_KEY);
   if (!deviceId) return 'no-device';
   try {
-    const resp = await fetch(`${getGoogleAccessTokenUrl}?deviceId=${encodeURIComponent(deviceId)}`);
-    if (resp.ok) {
-      const data = await resp.json();
-      applyToken(data.accessToken, data.expiresIn);
+    const result = await fetchAccessTokenForDevice(deviceId);
+    if (result.ok) {
+      applyToken(result.data.accessToken, result.data.expiresIn);
       return 'ok';
     }
-    if (resp.status === 401 || resp.status === 404) {
+    if (result.status === 401 || result.status === 404) {
       try { localStorage.removeItem(DEVICE_ID_KEY); } catch (e) { /* ignora */ }
       return 'revoked';
     }
@@ -297,16 +315,36 @@ function signInPersistent() {
     alert('Não foi possível abrir a janela de login do Google — verifique se pop-ups estão bloqueados para este site.');
     return;
   }
-  pollAfterPopup(popup, 0);
+  pollAfterPopup(deviceId, 0);
 }
 
-function pollAfterPopup(popup, attempt) {
+// Fica checando se a conexão terminou, a cada 1.5s, por até ~1min e meio.
+//
+// Dois cuidados importantes aqui (aprendidos testando de verdade):
+//  1. NÃO usamos silentRefreshViaBackend() nesse polling — ela apaga o
+//     deviceId do navegador ao receber um 404, mas um 404 AQUI é normal
+//     (a popup ainda não terminou de trocar o código pelo token). Usamos
+//     fetchAccessTokenForDevice() direto, que não tem esse efeito colateral.
+//  2. NÃO usamos popup.closed pra decidir desistir cedo. O Chrome, por uma
+//     política de isolamento entre origens (COOP) que o próprio
+//     accounts.google.com ativa assim que a popup navega pra lá, faz esse
+//     valor ficar não-confiável — reportou "fechada" nos testes mesmo com a
+//     popup ainda aberta na tela de permissão, fazendo o app desistir bem
+//     antes da conexão terminar (mesmo ela dando certo do lado do Google).
+//     Por isso agora só paramos ao ter sucesso ou ao esgotar as tentativas.
+function pollAfterPopup(deviceId, attempt) {
   if (attempt > 60) return; // ~1min e meio de tentativas — desiste em silêncio se a pessoa não terminou
   setTimeout(async () => {
-    const result = await silentRefreshViaBackend();
-    if (result === 'ok') return; // conectou!
-    if (popup.closed) return; // a pessoa fechou a janela sem concluir — desiste
-    pollAfterPopup(popup, attempt + 1);
+    try {
+      const result = await fetchAccessTokenForDevice(deviceId);
+      if (result.ok) {
+        applyToken(result.data.accessToken, result.data.expiresIn);
+        return; // conectou!
+      }
+    } catch (e) {
+      // falha de rede passageira — tenta de novo no próximo ciclo
+    }
+    pollAfterPopup(deviceId, attempt + 1);
   }, 1500);
 }
 
