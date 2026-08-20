@@ -193,6 +193,19 @@ async function silentRefreshViaBackend() {
   }
 }
 
+// Força uma renovação AGORA, ignorando qualquer timer agendado — usada por
+// calendar.js/photos.js quando uma chamada de verdade à API do Google volta
+// com 401 mesmo com o app mostrando "conectado". Isso significa que o token
+// em uso está desatualizado por algum motivo (aparelho ficou muito tempo
+// suspenso/em segundo plano e o timer de renovação não rodou na hora certa,
+// por exemplo) — em vez de esperar o próximo ciclo agendado (que pode estar
+// horas longe), pede um token novo na hora e corrige a tela sozinha.
+export async function forceRefresh() {
+  if (!isPersistentAuthConfigured()) return false;
+  const result = await silentRefreshViaBackend();
+  return result === 'ok';
+}
+
 // Antes, isso tentava renovar o token sozinho a cada ~1h chamando
 // requestAccessToken({prompt:''}) em segundo plano. Na teoria é "silencioso",
 // mas na prática — quando o navegador não consegue completar sem interação

@@ -12,7 +12,7 @@
 //  - Dia: lista cheia de um único dia, o mais detalhado.
 // ============================================================================
 import { createStore } from './store.js';
-import { onAuthChange, isSignedIn, isConfigured } from './auth.js';
+import { onAuthChange, isSignedIn, isConfigured, forceRefresh } from './auth.js';
 import { openModal } from './modal.js';
 import { todayStr, addDaysStr, parseDateStr, formatDateStr } from './recurrence.js';
 import { googleCalendarIds } from './config.js';
@@ -116,19 +116,29 @@ function localDayBoundaryISO(dateStr, endOfDay) {
   return dt.toISOString();
 }
 
+// ----------------------------------------------------------------------------
+// Busca no Google Calendar por um intervalo de datas específico — usado tanto
+// pela recarga "padrão" (ao conectar) quanto pela recarga sob demanda quando
+// a pessoa navega (Semana/Mês/Dia) para fora do intervalo já carregado.
+//
+// Precisa vir ANTES do onAuthChange(...) logo abaixo: onAuthChange chama o
+// callback imediatamente, de forma síncrona, no momento do registro — e se
+// isso acontecer durante a própria avaliação deste módulo (o caso normal,
+// já que auth.js e calendar.js são carregados juntos), um `let` declarado
+// só depois ainda estaria na "zona morta" e um "refreshFromGoogle()"
+// disparado nesse instante bateria em "Cannot access 'loadedRange' before
+// initialization". Foi exatamente esse erro visto no console — inofensivo
+// na prática (o valor final é o mesmo, null), mas evitável só invertendo a
+// ordem das declarações.
+// ----------------------------------------------------------------------------
+let loadedRange = null; // { start, end } — só é significativo quando connected
+
 onAuthChange((signedIn) => {
   connected = signedIn;
   refreshFromGoogle();
 });
 
-// ----------------------------------------------------------------------------
-// Busca no Google Calendar por um intervalo de datas específico — usado tanto
-// pela recarga "padrão" (ao conectar) quanto pela recarga sob demanda quando
-// a pessoa navega (Semana/Mês/Dia) para fora do intervalo já carregado.
-// ----------------------------------------------------------------------------
-let loadedRange = null; // { start, end } — só é significativo quando connected
-
-async function fetchGoogleEventsRange(fetchStartStr, fetchEndStr) {
+async function fetchGoogleEventsRange(fetchStartStr, fetchEndStr, isRetryAfterRefresh) {
   if (!connected || !window.gapi?.client?.calendar) return;
   try {
     const timeMin = localDayBoundaryISO(fetchStartStr, false);
@@ -136,6 +146,7 @@ async function fetchGoogleEventsRange(fetchStartStr, fetchEndStr) {
 
     // Busca em paralelo em todos os calendários configurados (o próprio +
     // quaisquer outros que tenham sido compartilhados com essa conta).
+    let sawAuthError = false;
     const results = await Promise.all(
       CALENDAR_IDS.map((calId) =>
         window.gapi.client.calendar.events.list({
@@ -147,11 +158,25 @@ async function fetchGoogleEventsRange(fetchStartStr, fetchEndStr) {
           maxResults: 250
         }).then((resp) => ({ calId, items: resp.result.items || [] }))
           .catch((e) => {
+            if ((e?.status || e?.result?.error?.code) === 401) sawAuthError = true;
             console.warn(`Não foi possível ler o calendário "${calId}" (verifique se foi compartilhado com essa conta):`, e);
             return { calId, items: [] };
           })
       )
     );
+
+    // O Google recusou o token mesmo com o app "conectado" na tela — geralmente
+    // porque a renovação automática agendada ainda não rodou (aparelho ficou
+    // muito tempo suspenso/em segundo plano, por exemplo). Força uma renovação
+    // de verdade agora e tenta essa mesma busca de novo, 1x só, antes de
+    // desistir — assim a tela se corrige sozinha sem precisar de F5.
+    if (sawAuthError && !isRetryAfterRefresh) {
+      const renewed = await forceRefresh();
+      if (renewed) {
+        await fetchGoogleEventsRange(fetchStartStr, fetchEndStr, true);
+        return;
+      }
+    }
 
     googleEventsCache = results.flatMap(({ calId, items }) =>
       items.map((ev) => ({

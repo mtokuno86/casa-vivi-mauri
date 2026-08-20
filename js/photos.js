@@ -4,7 +4,14 @@
 // na geladeira: pré-carrega as fotos e vai revezando sozinha.
 // ============================================================================
 import { photosDriveFolderId, photoRotationMs } from './config.js';
-import { onAuthChange, getAccessToken, isConfigured } from './auth.js';
+import { onAuthChange, getAccessToken, isConfigured, forceRefresh } from './auth.js';
+
+/** Detecta um 401 tanto no formato de erro do gapi (Drive) quanto do fetch cru (download da foto). */
+function isAuthError(e) {
+  const status = e?.status || e?.result?.error?.code;
+  if (status === 401) return true;
+  return typeof e?.message === 'string' && /:\s*401$/.test(e.message);
+}
 
 let blobUrls = [];
 let slides = []; // { url, dateLabel }
@@ -88,7 +95,7 @@ function renderGallery() {
   }, photoRotationMs);
 }
 
-async function loadGallery() {
+async function loadGallery(isRetryAfterRefresh) {
   if (!photosDriveFolderId) {
     renderEmpty('Configure <code>photosDriveFolderId</code> em js/config.js (ID da pasta do Google Drive) para ver as fotos aqui.');
     return;
@@ -102,7 +109,7 @@ async function loadGallery() {
     return;
   }
 
-  renderEmpty('Carregando fotos…');
+  if (!isRetryAfterRefresh) renderEmpty('Carregando fotos…');
   try {
     const files = await fetchFileList();
     if (!files.length) {
@@ -114,6 +121,14 @@ async function loadGallery() {
     slides = files.map((f, i) => ({ url: blobUrls[i], dateLabel: formatPhotoDate(f) }));
     renderGallery();
   } catch (e) {
+    // O Google recusou o token mesmo com o app "conectado" — provavelmente a
+    // renovação automática agendada ainda não rodou (aparelho ficou muito
+    // tempo suspenso/em segundo plano, por exemplo). Força uma renovação de
+    // verdade e tenta essa mesma carga de novo, 1x só, antes de desistir.
+    if (isAuthError(e) && !isRetryAfterRefresh) {
+      const renewed = await forceRefresh();
+      if (renewed) { await loadGallery(true); return; }
+    }
     console.error('Erro carregando galeria de fotos:', e);
     renderEmpty('Não foi possível carregar as fotos agora. Tentando de novo mais tarde.');
     setTimeout(loadGallery, 60000);
