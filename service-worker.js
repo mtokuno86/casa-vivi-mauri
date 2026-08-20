@@ -1,4 +1,4 @@
-const CACHE_NAME = 'casa-vm-v19';
+const CACHE_NAME = 'casa-vm-v20';
 const APP_SHELL = [
   './',
   './index.html',

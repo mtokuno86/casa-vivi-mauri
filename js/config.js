@@ -58,3 +58,7 @@ export const recipeImportFunctionUrl = "https://parserecipe-4zgmuhm3va-rj.a.run.
 // "https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/searchRecipes"
 // Deixe vazio para desativar o botão "Buscar por ingrediente".
 export const recipeSearchFunctionUrl = "https://searchrecipes-4zgmuhm3va-rj.a.run.app";
+
+export const googleOAuthCallbackUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/googleOAuthCallback";
+export const getGoogleAccessTokenUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/getGoogleAccessToken";
+export const disconnectGoogleUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/disconnectGoogle";

@@ -14,6 +14,24 @@
 // Quando não encontrar nada, o app cai de volta para o cadastro manual.
 // ============================================================================
 const { onRequest } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
+const admin = require('firebase-admin');
+
+admin.initializeApp();
+
+// Segredo do OAuth Client do Google (Cloud Console → Credenciais → o client
+// "Web application" que já existe → "Client secret"). NUNCA cole esse valor
+// direto no código — configure via terminal com:
+//   firebase functions:secrets:set GOOGLE_CLIENT_SECRET
+// (veja SETUP.md). Isso guarda o valor no Secret Manager do Google Cloud,
+// fora do código-fonte que vai pro GitHub.
+const googleClientSecret = defineSecret('GOOGLE_CLIENT_SECRET');
+
+// Esse NÃO é segredo (é o mesmo valor já público em js/config.js como
+// googleClientId) — só precisa bater exatamente com aquele.
+const GOOGLE_CLIENT_ID = '1094300436813-4esdk2ubn2hq0vjpb1gflflgh5li8il6.apps.googleusercontent.com';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 
 function parseISODuration(iso) {
   if (!iso || typeof iso !== 'string') return null;
@@ -453,5 +471,184 @@ exports.parseRecipe = onRequest({ cors: true, region: 'southamerica-east1' }, as
   } catch (e) {
     console.error('Erro ao processar receita:', e);
     res.status(500).json({ error: 'Erro ao processar essa receita. Tente novamente ou cadastre manualmente.' });
+  }
+});
+
+// ============================================================================
+// Conexão permanente com o Google — 3 funções que, juntas, substituem o
+// "renova sozinho por ~1h e depois pede login de novo" por uma conexão que
+// dura até a pessoa desconectar de propósito.
+//
+// Como funciona (visão geral):
+//  1. googleOAuthCallback: o navegador abre uma aba de autorização de
+//     verdade do Google (uma única vez por aparelho) pedindo acesso
+//     "offline" — a resposta inclui um refresh_token, que NUNCA expira por
+//     tempo (só se a pessoa revogar, ou ficar 6 meses sem usar, ou o app
+//     ficar em modo "Testing" no Google Cloud — daí o 7º passo do SETUP.md
+//     de publicar a tela de consentimento). Essa função recebe o código de
+//     autorização, troca por tokens, e guarda o refresh_token no Firestore
+//     — nunca no navegador, por segurança.
+//  2. getGoogleAccessToken: toda vez que o app precisa de um token de
+//     acesso válido (a cada ~1h, ou ao abrir o app), chama essa função, que
+//     usa o refresh_token guardado pra pedir um novo token curto ao Google.
+//     Isso acontece em segundo plano, sem NENHUMA interação — sem popup.
+//  3. disconnectGoogle: desconecta de verdade (revoga no Google + apaga o
+//     refresh_token do Firestore) — usado quando a pessoa clica pra
+//     desconectar, não só quando o token local expira.
+//
+// IMPORTANTE (segurança): a coleção "googleAuthTokens" no Firestore guarda
+// um segredo de verdade (o refresh_token). As regras de segurança do
+// Firestore (firestore.rules, fora deste arquivo) precisam bloquear
+// qualquer leitura/escrita direta do app nessa coleção — só o Admin SDK
+// (essas Cloud Functions) deve acessá-la. Veja o trecho pronto no SETUP.md.
+// ============================================================================
+const GOOGLE_AUTH_COLLECTION = 'googleAuthTokens';
+
+async function exchangeCodeForTokens(code, redirectUri, clientSecret) {
+  const resp = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error_description || data.error || 'Falha ao trocar código por tokens.');
+  return data;
+}
+
+async function refreshAccessToken(refreshToken, clientSecret) {
+  const resp = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      refresh_token: refreshToken,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token'
+    })
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    const err = new Error(data.error_description || data.error || 'Falha ao renovar token.');
+    err.code = data.error;
+    throw err;
+  }
+  return data;
+}
+
+function callbackRedirectUri() {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'casa-a-casa-504119';
+  return `https://southamerica-east1-${projectId}.cloudfunctions.net/googleOAuthCallback`;
+}
+
+function oauthResultPage(success, message) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Casa Vivi & Mauri</title></head>
+<body style="font-family:sans-serif; text-align:center; padding:48px 20px; color:#2b2b28;">
+  <h2>${success ? '✅' : '⚠️'} ${message}</h2>
+  <p>Pode fechar esta janela.</p>
+  <script>setTimeout(function(){ window.close(); }, 1800);</script>
+</body></html>`;
+}
+
+// Recebe o retorno do Google depois da tela de permissão (redirect_uri) —
+// troca o código por tokens e guarda o refresh_token no Firestore, indexado
+// pelo "deviceId" que veio de volta no parâmetro "state" (o app manda esse
+// id na hora de abrir a autorização, pra saber depois qual aparelho é qual).
+exports.googleOAuthCallback = onRequest({ cors: false, region: 'southamerica-east1', secrets: [googleClientSecret] }, async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error) {
+    res.status(400).send(oauthResultPage(false, 'Autorização cancelada ou negada.'));
+    return;
+  }
+  if (!code || !state || typeof code !== 'string' || typeof state !== 'string') {
+    res.status(400).send(oauthResultPage(false, 'Requisição inválida.'));
+    return;
+  }
+  try {
+    const tokens = await exchangeCodeForTokens(code, callbackRedirectUri(), googleClientSecret.value());
+    if (!tokens.refresh_token) {
+      res.status(400).send(oauthResultPage(false, 'O Google não retornou um token de renovação. Tente desconectar o app em myaccount.google.com/permissions e conectar de novo.'));
+      return;
+    }
+
+    let email = null;
+    try {
+      const uiResp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` }
+      });
+      if (uiResp.ok) email = (await uiResp.json()).email || null;
+    } catch (e) { /* não essencial — só pra identificação na tela, ignora falha */ }
+
+    await admin.firestore().collection(GOOGLE_AUTH_COLLECTION).doc(state).set({
+      refreshToken: tokens.refresh_token,
+      email,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    res.send(oauthResultPage(true, email ? `Conectado como ${email}.` : 'Conectado!'));
+  } catch (e) {
+    console.error('Erro no callback OAuth do Google:', e);
+    res.status(500).send(oauthResultPage(false, 'Erro ao conectar. Tente novamente.'));
+  }
+});
+
+// Chamada pelo app toda vez que precisa de um token de acesso válido — usa o
+// refresh_token guardado pra pedir um novo ao Google, sem nenhuma interação.
+exports.getGoogleAccessToken = onRequest({ cors: true, region: 'southamerica-east1', secrets: [googleClientSecret] }, async (req, res) => {
+  const deviceId = req.query.deviceId;
+  if (!deviceId || typeof deviceId !== 'string') {
+    res.status(400).json({ error: 'Passe o deviceId.' });
+    return;
+  }
+  const docRef = admin.firestore().collection(GOOGLE_AUTH_COLLECTION).doc(deviceId);
+  try {
+    const doc = await docRef.get();
+    if (!doc.exists) {
+      res.status(404).json({ error: 'Esse aparelho nunca conectou ao Google (ou já foi desconectado).' });
+      return;
+    }
+    const tokens = await refreshAccessToken(doc.data().refreshToken, googleClientSecret.value());
+    res.json({ accessToken: tokens.access_token, expiresIn: tokens.expires_in });
+  } catch (e) {
+    if (e.code === 'invalid_grant') {
+      // Refresh token revogado/expirado de vez — limpa e avisa o app pra
+      // pedir reconexão manual (não adianta tentar de novo sozinho).
+      await docRef.delete().catch(() => {});
+      res.status(401).json({ error: 'Conexão com o Google expirou ou foi revogada — reconecte manualmente.' });
+      return;
+    }
+    console.error('Erro ao renovar token do Google:', e);
+    res.status(500).json({ error: 'Erro ao renovar a conexão com o Google.' });
+  }
+});
+
+// Desconecta de verdade: revoga o token no Google e apaga o refresh_token
+// guardado — usado quando a pessoa clica pra desconectar (não é chamada
+// quando o token local só "expira" por tempo, ver auth.js).
+exports.disconnectGoogle = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
+  const deviceId = req.query.deviceId;
+  if (!deviceId || typeof deviceId !== 'string') {
+    res.status(400).json({ error: 'Passe o deviceId.' });
+    return;
+  }
+  try {
+    const docRef = admin.firestore().collection(GOOGLE_AUTH_COLLECTION).doc(deviceId);
+    const doc = await docRef.get();
+    if (doc.exists) {
+      const { refreshToken } = doc.data();
+      if (refreshToken) {
+        await fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(refreshToken)}`, { method: 'POST' }).catch(() => {});
+      }
+      await docRef.delete();
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Erro ao desconectar do Google:', e);
+    res.status(500).json({ error: 'Erro ao desconectar.' });
   }
 });

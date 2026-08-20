@@ -1,8 +1,24 @@
 // ============================================================================
 // auth.js — login Google (Identity Services) + inicialização do cliente
 // gapi, usado por calendar.js (Google Calendar) e photos.js (Drive).
+//
+// Dois modos de conexão, um por cima do outro:
+//
+// 1) MODO PERSISTENTE (recomendado, precisa de configuração extra — ver
+//    SETUP.md): quando googleOAuthCallbackUrl/getGoogleAccessTokenUrl estão
+//    preenchidas em config.js, a primeira conexão pede um "refresh token" ao
+//    Google (guardado no Firestore por uma Cloud Function, nunca no
+//    navegador) e, a partir daí, o app renova o acesso sozinho pra sempre —
+//    sem popup, sem expirar por tempo — até a pessoa desconectar de
+//    propósito (botão "Google conectado ✓" → confirma desconectar).
+//
+// 2) MODO ANTIGO (sempre funciona, é o padrão até configurar o modo acima):
+//    usa o Google Identity Services direto no navegador. O token expira em
+//    ~1h; o app tenta reconectar sozinho 1x por sessão de aba (não a cada
+//    reload automático — ver comentário em scheduleExpiry) e, se isso
+//    falhar, volta pro estado "desconectado" até um clique manual.
 // ============================================================================
-import { googleClientId, googleApiKey } from './config.js';
+import { googleClientId, googleApiKey, googleOAuthCallbackUrl, getGoogleAccessTokenUrl, disconnectGoogleUrl } from './config.js';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
@@ -20,12 +36,29 @@ let userInfo = null; // { email, name, picture } — carregado após login
 const listeners = new Set();
 
 const TOKEN_STORAGE_KEY = 'casa-vm:googleToken';
+const DEVICE_ID_KEY = 'casa-vm:googleDeviceId';
 // sessionStorage (não localStorage!) — existe só enquanto a aba/janela do
 // navegador continua aberta, mesmo sobrevivendo a um location.reload(). É
 // isso que permite "tentar reconectar 1x por sessão de aba", sem repetir a
 // cada reload automático (ver initIdleReload em app.js, que recarrega a
-// página a cada 15 min de inatividade).
+// página a cada 15 min de inatividade) — só usado no modo antigo, o modo
+// persistente não precisa dessa cautela (ver mais abaixo).
 const SILENT_RECONNECT_KEY = 'casa-vm:silentReconnectTried';
+
+function isPersistentAuthConfigured() {
+  return !!(googleOAuthCallbackUrl && getGoogleAccessTokenUrl);
+}
+
+function getOrCreateDeviceId() {
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = (window.crypto?.randomUUID)
+      ? window.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try { localStorage.setItem(DEVICE_ID_KEY, id); } catch (e) { /* ignora */ }
+  }
+  return id;
+}
 
 function saveTokenToStorage(token, expiresAtMs) {
   try {
@@ -111,26 +144,67 @@ async function ensureGapiClient() {
   gapiReady = true;
 }
 
+// ----------------------------------------------------------------------------
+// Modo persistente — pede um access token novo à nossa Cloud Function
+// (getGoogleAccessToken), que usa o refresh_token guardado no Firestore.
+// Nunca abre nada visível: ou funciona em silêncio, ou falha com um status
+// que diz exatamente o que fazer.
+//
+// Retorna: 'ok' (conectado), 'revoked' (precisa reconectar manualmente),
+// 'no-device' (esse aparelho nunca fez a conexão persistente) ou 'error'
+// (falha de rede/servidor — vale tentar de novo em breve).
+// ----------------------------------------------------------------------------
+async function silentRefreshViaBackend() {
+  const deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  if (!deviceId) return 'no-device';
+  try {
+    const resp = await fetch(`${getGoogleAccessTokenUrl}?deviceId=${encodeURIComponent(deviceId)}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      applyToken(data.accessToken, data.expiresIn);
+      return 'ok';
+    }
+    if (resp.status === 401 || resp.status === 404) {
+      try { localStorage.removeItem(DEVICE_ID_KEY); } catch (e) { /* ignora */ }
+      return 'revoked';
+    }
+    return 'error';
+  } catch (e) {
+    console.warn('Falha de rede ao renovar a conexão persistente com o Google:', e);
+    return 'error';
+  }
+}
+
 // Antes, isso tentava renovar o token sozinho a cada ~1h chamando
 // requestAccessToken({prompt:''}) em segundo plano. Na teoria é "silencioso",
 // mas na prática — quando o navegador não consegue completar sem interação
-// (sessão do Google não disponível ali, restrições do navegador etc.) — o
-// Google acaba abrindo uma janela/aba de login mesmo assim. Com o app aberto
-// o dia todo (o computador, o tablet), isso gerava várias abas de login
-// empilhadas ao longo do tempo, sem ninguém por perto pra fechar cada uma.
-// Por isso agora a gente NÃO tenta renovar sozinho: quando o token expira,
-// só volta pro estado "desconectado" (mostra "Conectar Google" de novo) —
-// reconectar vira sempre um clique explícito da pessoa, nunca um pop-up
-// surgindo por conta própria.
+// — o Google acaba abrindo uma janela/aba de login mesmo assim. Com o app
+// aberto o dia todo, isso gerava várias abas de login empilhadas.
+//
+// Agora, se o modo persistente estiver configurado, a renovação passa a ser
+// pela nossa própria Cloud Function (sem NENHUMA interação possível do lado
+// do Google) — é isso que permite ficar conectado "para sempre". Só cai pro
+// comportamento antigo (desconectar e exigir clique manual) se o modo
+// persistente não estiver configurado, ou se a conexão persistente falhar
+// de vez (revogada).
 function scheduleExpiry(expiresInSec) {
   clearTimeout(refreshTimer);
   const expiresInMs = Math.max((expiresInSec || 0) * 1000, 30000);
-  refreshTimer = setTimeout(() => {
+  // Renova com 5 min de folga antes de expirar de vez — assim o app nunca
+  // chega a ficar sem token válido no meio do uso.
+  const renewInMs = Math.max(expiresInMs - 5 * 60 * 1000, 30000);
+  refreshTimer = setTimeout(async () => {
+    if (isPersistentAuthConfigured()) {
+      const result = await silentRefreshViaBackend();
+      if (result === 'ok') return;
+      if (result === 'error') { scheduleExpiry(60); return; } // problema passageiro — tenta de novo em 1 min
+      // 'revoked' ou 'no-device': cai pro estado desconectado abaixo.
+    }
     signedIn = false;
     accessToken = null;
     try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* ignora */ }
     notify();
-  }, expiresInMs);
+  }, renewInMs);
 }
 
 function applyToken(token, expiresInSec) {
@@ -176,21 +250,24 @@ export async function initAuth() {
     return;
   }
 
-  // Sem token válido em cache: tenta reconectar silenciosamente (sem popup)
-  // se já houve consentimento antes. Em navegadores mobile/PWA isso nem
-  // sempre é 100% silencioso — é uma limitação do próprio Google Identity
-  // Services, não do app.
-  //
-  // MAS só tenta 1x por sessão de aba (sessionStorage, não localStorage).
-  // Motivo: app.js recarrega a página sozinho a cada 15 min de inatividade
+  // Esse aparelho já fez a conexão persistente antes? Renova em silêncio
+  // pela nossa Cloud Function — sem popup, sem depender do Google Identity
+  // Services, e sem limite de 1x por sessão (não tem risco de popup aqui).
+  if (isPersistentAuthConfigured() && localStorage.getItem(DEVICE_ID_KEY)) {
+    const result = await silentRefreshViaBackend();
+    if (result === 'ok') return;
+    // 'revoked'/'no-device'/'error': cai pro modo antigo abaixo como último recurso.
+  }
+
+  // Modo antigo: tenta reconectar silenciosamente (sem popup) via Google
+  // Identity Services, mas só 1x por sessão de aba (sessionStorage). Motivo:
+  // app.js recarrega a página sozinho a cada 15 min de inatividade
   // (initIdleReload), e cada reload chama initAuth() de novo. Sem esse
-  // limite, um computador/tablet que fica ligado (e parado) a noite toda
-  // dispara essa tentativa a cada 15 min — e quando o Google não consegue
-  // completar 100% em silêncio, ele abre uma aba/janela de login em vez de
-  // falhar quieto. Foi exatamente isso que gerou "dezenas de abas" pedindo
-  // login de um dia pro outro. Fechar e reabrir a aba/navegador limpa o
-  // sessionStorage, então a tentativa silenciosa volta a acontecer
-  // normalmente na próxima vez que o app for aberto de verdade.
+  // limite, um computador/tablet que fica ligado a noite toda dispara essa
+  // tentativa a cada 15 min — e quando o Google não consegue completar 100%
+  // em silêncio, ele abre uma aba/janela de login em vez de falhar quieto.
+  // Foi exatamente isso que gerou "dezenas de abas" pedindo login de um dia
+  // pro outro, antes de existir o modo persistente acima.
   let alreadyTried = false;
   try { alreadyTried = sessionStorage.getItem(SILENT_RECONNECT_KEY) === 'true'; } catch (e) { /* ignora */ }
   if (alreadyTried) return;
@@ -199,10 +276,67 @@ export async function initAuth() {
   tokenClient.requestAccessToken({ prompt: '' });
 }
 
+// Abre a tela de permissão de verdade do Google numa janela popup, pedindo
+// acesso "offline" (dá origem a um refresh_token) — só precisa acontecer
+// uma vez por aparelho. O popup fecha sozinho quando termina (ver a página
+// de retorno em functions/index.js, googleOAuthCallback).
+function signInPersistent() {
+  const deviceId = getOrCreateDeviceId();
+  const params = new URLSearchParams({
+    client_id: googleClientId,
+    redirect_uri: googleOAuthCallbackUrl,
+    response_type: 'code',
+    scope: SCOPES,
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: 'true',
+    state: deviceId
+  });
+  const popup = window.open(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`, 'googleAuthPopup', 'width=500,height=680');
+  if (!popup) {
+    alert('Não foi possível abrir a janela de login do Google — verifique se pop-ups estão bloqueados para este site.');
+    return;
+  }
+  pollAfterPopup(popup, 0);
+}
+
+function pollAfterPopup(popup, attempt) {
+  if (attempt > 60) return; // ~1min e meio de tentativas — desiste em silêncio se a pessoa não terminou
+  setTimeout(async () => {
+    const result = await silentRefreshViaBackend();
+    if (result === 'ok') return; // conectou!
+    if (popup.closed) return; // a pessoa fechou a janela sem concluir — desiste
+    pollAfterPopup(popup, attempt + 1);
+  }, 1500);
+}
+
 export function signIn() {
+  if (isPersistentAuthConfigured()) {
+    signInPersistent();
+    return;
+  }
   if (!tokenClient) {
     alert('Configure o Google Client ID / API Key em js/config.js primeiro (veja SETUP.md).');
     return;
   }
   tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+/** Desconecta de verdade: revoga a conexão persistente no Google (se houver) e limpa tudo neste aparelho. */
+export async function disconnectGoogle() {
+  const deviceId = localStorage.getItem(DEVICE_ID_KEY);
+  clearTimeout(refreshTimer);
+  signedIn = false;
+  accessToken = null;
+  userInfo = null;
+  try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* ignora */ }
+  try { localStorage.removeItem(DEVICE_ID_KEY); } catch (e) { /* ignora */ }
+  notify();
+  if (deviceId && disconnectGoogleUrl) {
+    try {
+      await fetch(`${disconnectGoogleUrl}?deviceId=${encodeURIComponent(deviceId)}`, { method: 'POST' });
+    } catch (e) {
+      console.warn('Falha ao revogar a conexão no servidor (já desconectado neste aparelho):', e);
+    }
+  }
 }

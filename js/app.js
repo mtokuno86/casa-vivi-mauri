@@ -16,7 +16,7 @@ import { initDb, getMode } from './db.js';
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, mas sempre no horário de São Paulo (UTC-3, sem horário de
 // verão desde 2019) — não no horário UTC/local de quem estiver editando.
-const BUILD_STAMP = '2026-08-16 09:11';
+const BUILD_STAMP = '2026-08-18 17:14';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');
@@ -176,7 +176,15 @@ async function main() {
   initIdleReload();
 
   const googleBtn = document.getElementById('googleSignInBtn');
-  googleBtn.addEventListener('click', authMod.signIn);
+  googleBtn.addEventListener('click', async () => {
+    if (authMod.isSignedIn()) {
+      if (window.confirm('Desconectar sua conta Google deste aparelho?')) {
+        await authMod.disconnectGoogle();
+      }
+      return;
+    }
+    authMod.signIn();
+  });
   authMod.onAuthChange((signedIn) => {
     googleBtn.textContent = signedIn ? 'Google conectado ✓' : 'Conectar Google';
   });

@@ -180,7 +180,134 @@ para a lista atualizada e o porquê desses dois.
 
 ---
 
-## 7. Testando
+## 7. Conexão permanente com o Google (opcional, recomendado)
+
+Sem isso, a conexão com o Google (Calendário + Fotos) some sozinha depois de um
+tempo de uso contínuo sem reabrir o app, e às vezes pede login de novo. Com
+isso configurado, a conexão dura até você mesmo desconectar (botão "Google
+conectado ✓" → confirma) — o app renova sozinho em segundo plano, para sempre.
+
+**Como funciona, por trás:** o Google só emite um "token que nunca expira por
+tempo" (refresh token) através de um fluxo que precisa de um servidor pra
+guardar esse token com segurança — por isso são 3 Cloud Functions novas
+(`googleOAuthCallback`, `getGoogleAccessToken`, `disconnectGoogle`), já
+prontas em `functions/index.js`.
+
+### 7.1. Pegar o "Client secret"
+
+1. **console.cloud.google.com** → **APIs e serviços → Credenciais**.
+2. Clique no OAuth Client "Aplicativo da Web" que você já criou no passo 4.
+3. Copie o **Client secret** (não confunda com o Client ID, que já está em
+   `js/config.js`).
+
+### 7.2. Guardar o Client secret com segurança
+
+**Nunca cole o Client secret em nenhum arquivo do projeto** (esses arquivos
+vão pro GitHub). Guarde no Secret Manager do Google, via terminal:
+
+```bash
+firebase functions:secrets:set GOOGLE_CLIENT_SECRET
+```
+
+Cole o valor quando pedir. Pronto — só a Cloud Function consegue ler isso.
+
+### 7.3. Autorizar o link de retorno (redirect URI)
+
+1. Ainda em **Credenciais** → o mesmo OAuth Client → **URIs de redirecionamento
+   autorizados** → **Adicionar URI**.
+2. Cole (troque `SEU-PROJETO` pelo ID do seu projeto Firebase/Google Cloud):
+   ```
+   https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/googleOAuthCallback
+   ```
+3. Salvar.
+
+### 7.4. Publicar a tela de consentimento OAuth
+
+1. **APIs e serviços → Tela de consentimento OAuth**.
+2. Botão **Publicar app** (sai de "Testing" para "Em produção").
+3. Isso NÃO torna o app público de verdade (só quem tem o link consegue usar) —
+   só remove o limite de 7 dias que o modo "Testing" impõe nos tokens de
+   renovação. Como o app nunca passou pela verificação do Google, cada pessoa
+   vai ver uma tela "o Google não verificou esse app" a primeira vez que
+   conectar — é só clicar em **Avançado → Acessar (nome do app) — não
+   seguro**, como no login normal de hoje.
+
+### 7.5. Instalar dependências e publicar as funções
+
+```bash
+cd functions
+npm install
+cd ..
+firebase deploy --only functions
+```
+
+O terminal mostra as URLs de todas as funções, incluindo as 3 novas:
+
+```
+https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/googleOAuthCallback
+https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/getGoogleAccessToken
+https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/disconnectGoogle
+```
+
+Cole as 3 em `js/config.js`: `googleOAuthCallbackUrl`, `getGoogleAccessTokenUrl`
+e `disconnectGoogleUrl`.
+
+### 7.6. Proteger o Firestore (importante!)
+
+Essas funções guardam o refresh token (um segredo de verdade — dá acesso ao
+Calendário e Drive de quem conectou) numa coleção nova, `googleAuthTokens`.
+As regras do Firestore do passo 1.4 liberam **tudo** (`match /{document=**}`)
+— isso deixaria esse segredo lível por qualquer um com o link do app. Troque
+as regras do Firestore por isto, que libera só as coleções que o app
+realmente usa e bloqueia a nova de propósito:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /localEvents/{id}     { allow read, write: if true; }
+    match /mealPlan/{id}        { allow read, write: if true; }
+    match /members/{id}         { allow read, write: if true; }
+    match /recipes/{id}         { allow read, write: if true; }
+    match /shoppingExtras/{id}  { allow read, write: if true; }
+    match /shoppingChecks/{id}  { allow read, write: if true; }
+    match /pantryStock/{id}     { allow read, write: if true; }
+    match /houseStock/{id}      { allow read, write: if true; }
+    match /tasks/{id}           { allow read, write: if true; }
+
+    // Guarda o refresh_token do Google — só a Cloud Function (Admin SDK)
+    // pode acessar. NUNCA mude isso pra "if true".
+    match /googleAuthTokens/{deviceId} { allow read, write: if false; }
+  }
+}
+```
+
+*(Se você adicionar uma coleção nova no app depois, lembre de adicionar a
+linha dela aqui também — regras específicas por coleção, em vez do
+`{document=**}` genérico, é o que torna esse bloqueio possível.)*
+
+### 7.7. Publicar e testar
+
+```bash
+firebase deploy
+```
+
+Em cada aparelho: clique em **"Conectar Google"** de novo (mesmo já estando
+conectado no modo antigo) → tela de permissão do Google (com o aviso "não
+verificado", clique **Avançado → Acessar mesmo assim**) → conceda as
+permissões → a janela fecha sozinha em ~2s → pronto, esse aparelho ficou
+conectado de vez.
+
+Pra confirmar que funcionou: feche e abra o app de novo depois de uns
+minutos — não deve pedir login. Pra desconectar de verdade, clique em
+"Google conectado ✓" no topo e confirme.
+
+*(Se pular esta seção, nada quebra — o app continua no modo antigo de
+reconexão automática por sessão, só não dura "para sempre".)*
+
+---
+
+## 8. Testando
 
 - Abra o app no celular, toque em **"Conectar Google"** no topo, faça login (vai
   aparecer um aviso de "app não verificado" — é esperado, toque em **Avançado →
@@ -195,7 +322,7 @@ para a lista atualizada e o porquê desses dois.
 
 ---
 
-## 8. Publicar depois na Play Store (etapa futura, separada)
+## 9. Publicar depois na Play Store (etapa futura, separada)
 
 Quando estiver satisfeito com o app em uso doméstico, dá para empacotar essa mesma
 PWA como um app Android de verdade usando o **Bubblewrap** (ferramenta oficial do
