@@ -1,4 +1,4 @@
-const CACHE_NAME = 'casa-vm-v22';
+const CACHE_NAME = 'casa-vm-v24';
 const APP_SHELL = [
   './',
   './index.html',
@@ -44,6 +44,15 @@ self.addEventListener('activate', (event) => {
 // não pode ficar preso em cache); cache-first para o resto do app shell.
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
+
+  // Deixa passar direto (sem entrar no cache) qualquer requisição que não
+  // seja do nosso próprio site — por exemplo "chrome-extension://..." de
+  // extensões do navegador mexendo na página, ou métodos que não são GET
+  // (a Cache API só aceita GET; tentar guardar POST/PUT gera erro). Sem
+  // esse filtro, o navegador tenta cachear pedidos de extensões de terceiros
+  // e a chamada falha com "Request scheme ... is unsupported".
+  if (event.request.method !== 'GET' || !url.startsWith('http')) return;
+
   const isExternal = url.includes('googleapis.com') || url.includes('firebaseio.com') || url.includes('gstatic.com');
   const isConfig = url.includes('/js/config.js');
 
