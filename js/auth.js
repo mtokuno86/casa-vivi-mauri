@@ -200,10 +200,30 @@ async function silentRefreshViaBackend() {
 // suspenso/em segundo plano e o timer de renovação não rodou na hora certa,
 // por exemplo) — em vez de esperar o próximo ciclo agendado (que pode estar
 // horas longe), pede um token novo na hora e corrige a tela sozinha.
+//
+// CUIDADO (aprendido testando de verdade): applyToken() chama notify() a
+// cada renovação bem-sucedida — e notify() acorda TODOS os módulos
+// inscritos (calendar.js E photos.js), não só quem pediu a renovação. Se o
+// token que o backend devolve continuar sendo recusado pelo Google (ex: a
+// conexão em si está com problema, não só o token local desatualizado),
+// cada um desses módulos bate de novo, cada 401 pede outra renovação, cada
+// renovação chama notify() de novo — um loop que se multiplica a cada
+// rodada. Por isso forceRefresh() tem um intervalo mínimo entre tentativas
+// de verdade ao backend (não adianta martelar se a resposta continua ruim)
+// e nunca deixa duas chamadas simultâneas dispararem duas requisições.
+let lastForceRefreshAttemptMs = 0;
+let forceRefreshInFlight = null;
+const FORCE_REFRESH_COOLDOWN_MS = 20000;
+
 export async function forceRefresh() {
   if (!isPersistentAuthConfigured()) return false;
-  const result = await silentRefreshViaBackend();
-  return result === 'ok';
+  if (forceRefreshInFlight) return forceRefreshInFlight;
+  if (Date.now() - lastForceRefreshAttemptMs < FORCE_REFRESH_COOLDOWN_MS) return false;
+  lastForceRefreshAttemptMs = Date.now();
+  forceRefreshInFlight = silentRefreshViaBackend()
+    .then((result) => result === 'ok')
+    .finally(() => { forceRefreshInFlight = null; });
+  return forceRefreshInFlight;
 }
 
 // Antes, isso tentava renovar o token sozinho a cada ~1h chamando
