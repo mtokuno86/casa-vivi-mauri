@@ -221,7 +221,13 @@ export async function forceRefresh() {
   if (Date.now() - lastForceRefreshAttemptMs < FORCE_REFRESH_COOLDOWN_MS) return false;
   lastForceRefreshAttemptMs = Date.now();
   forceRefreshInFlight = silentRefreshViaBackend()
-    .then((result) => result === 'ok')
+    .then((result) => {
+      // 'revoked'/'no-device': a conexão morreu de vez (não é só token
+      // vencido) — avisa a tela agora, em vez de deixar o badge preso em
+      // "conectado" enquanto tudo continua falhando por trás.
+      if (result === 'revoked' || result === 'no-device') forceSignOutLocally();
+      return result === 'ok';
+    })
     .finally(() => { forceRefreshInFlight = null; });
   return forceRefreshInFlight;
 }
@@ -251,10 +257,7 @@ function scheduleExpiry(expiresInSec) {
       if (result === 'error') { scheduleExpiry(60); return; } // problema passageiro — tenta de novo em 1 min
       // 'revoked' ou 'no-device': cai pro estado desconectado abaixo.
     }
-    signedIn = false;
-    accessToken = null;
-    try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* ignora */ }
-    notify();
+    forceSignOutLocally();
   }, renewInMs);
 }
 
@@ -267,6 +270,23 @@ function applyToken(token, expiresInSec) {
   scheduleExpiry(expiresInSec || 3300);
   notify();
   fetchUserInfo();
+}
+
+// Desliga de vez o estado "conectado" NESTE aparelho e avisa a tela (botão
+// volta a mostrar "Conectar Google"). Usada quando descobrimos que a conexão
+// persistente morreu de verdade (revogada no Google, ou o registro sumiu do
+// nosso banco) — sem isso, o app ficava preso mostrando "Google conectado ✓"
+// pra sempre enquanto Agenda/Fotos silenciosamente continuavam falhando por
+// trás, porque nada nunca avisava a tela que a conexão tinha acabado. Foi
+// exatamente esse o sintoma relatado no celular/tablet: badge "conectado"
+// junto com erro constante ao carregar Agenda/Fotos.
+function forceSignOutLocally() {
+  clearTimeout(refreshTimer);
+  signedIn = false;
+  accessToken = null;
+  userInfo = null;
+  try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* ignora */ }
+  notify();
 }
 
 export async function initAuth() {
