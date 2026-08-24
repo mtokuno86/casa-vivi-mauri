@@ -156,11 +156,33 @@ async function ensureGapiClient() {
 // popup ainda não terminou de trocar o código pelo token), não significa
 // "conexão revogada" — por isso quem decide o que fazer com um 404 é cada
 // chamador, não essa função.
+//
+// TIMEOUT (aprendido testando de verdade): o fetch() do navegador não tem
+// limite de tempo por padrão — se a rede cair de um jeito "silencioso" (sem
+// fechar a conexão de forma limpa, comum quando o celular troca de wifi pra
+// dados móveis, ou a tela apaga no meio da requisição), essa promise pode
+// nunca resolver. Isso é grave porque forceRefresh() usa uma única promise
+// compartilhada (forceRefreshInFlight) pra nunca disparar duas renovações ao
+// mesmo tempo — se ELA travar pra sempre, TODA tentativa futura de renovar
+// (inclusive depois de horas) fica presa esperando essa mesma promise morta,
+// e o app nunca mais consegue se recuperar sozinho (foi exatamente esse o
+// sintoma: um loop de 401 que nunca chegava a chamar nosso servidor de
+// verdade). O AbortController abaixo garante que, no máximo em 10s, a
+// chamada desiste e cai no "catch" como falha de rede normal — liberando o
+// cadeado pra próxima tentativa.
 // ----------------------------------------------------------------------------
+const FETCH_TOKEN_TIMEOUT_MS = 10000;
+
 async function fetchAccessTokenForDevice(deviceId) {
-  const resp = await fetch(`${getGoogleAccessTokenUrl}?deviceId=${encodeURIComponent(deviceId)}`);
-  if (resp.ok) return { ok: true, data: await resp.json() };
-  return { ok: false, status: resp.status };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TOKEN_TIMEOUT_MS);
+  try {
+    const resp = await fetch(`${getGoogleAccessTokenUrl}?deviceId=${encodeURIComponent(deviceId)}`, { signal: controller.signal });
+    if (resp.ok) return { ok: true, data: await resp.json() };
+    return { ok: false, status: resp.status };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // Retorna: 'ok' (conectado), 'revoked' (precisa reconectar manualmente),
