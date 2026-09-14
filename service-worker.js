@@ -1,4 +1,4 @@
-const CACHE_NAME = 'casa-vm-v27';
+const CACHE_NAME = 'casa-vm-v28';
 const APP_SHELL = [
   './',
   './index.html',
@@ -53,10 +53,27 @@ self.addEventListener('fetch', (event) => {
   // e a chamada falha com "Request scheme ... is unsupported".
   if (event.request.method !== 'GET' || !url.startsWith('http')) return;
 
-  const isExternal = url.includes('googleapis.com') || url.includes('firebaseio.com') || url.includes('gstatic.com');
+  // BUG ENCONTRADO EM PRODUÇÃO (14/09/2026): antes, "isExternal" era uma
+  // lista de domínios (googleapis.com, firebaseio.com, gstatic.com) — e
+  // "cloudfunctions.net"/"run.app" (onde ficam TODAS as nossas Cloud
+  // Functions, inclusive getGoogleAccessToken) não estavam nessa lista. Sem
+  // querer, isso fazia o token de acesso do Google cair no ramo "cache-first"
+  // lá embaixo: a primeira renovação bem-sucedida ficava guardada em cache
+  // pra sempre, e toda chamada seguinte (mesmo dias depois) devolvia esse
+  // MESMO token velho/vencido em 1ms — sem nunca consultar o Google de novo.
+  // O app achava que tinha renovado com sucesso, mas estava reaplicando um
+  // token morto, e por isso Agenda/Fotos falhavam com 401 mesmo "conectado".
+  //
+  // Correção: em vez de listar domínios (uma lista assim sempre esquece
+  // algum, como aconteceu aqui), comparamos a ORIGEM da requisição com a
+  // origem do próprio site. Qualquer coisa que não seja do nosso site
+  // (Google, Firebase, nossas Cloud Functions, qualquer API futura) cai
+  // automaticamente no caminho "nunca cachear" — só o HTML/CSS/JS do app em
+  // si (mesma origem) usa cache-first.
+  const isSameOrigin = url.startsWith(self.location.origin);
   const isConfig = url.includes('/js/config.js');
 
-  if (isExternal || isConfig) {
+  if (!isSameOrigin || isConfig) {
     event.respondWith(
       fetch(event.request, { cache: 'no-store' }).catch(() => caches.match(event.request))
     );
