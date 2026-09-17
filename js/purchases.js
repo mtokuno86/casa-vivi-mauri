@@ -94,10 +94,49 @@ function getImageDataAt(img, sx, sy, sw, sh, maxDim) {
   return { imageData: ctx.getImageData(0, 0, canvas.width, canvas.height), canvas };
 }
 
-function tryDecode(imageData) {
+function tryDecodeJsQR(imageData) {
   // "attemptBoth" cobre o caso (raro, mas acontece em fotos com flash/reflexo)
   // de o QR sair com as cores invertidas na captura.
-  return window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+  const r = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+  return r ? r.data : null;
+}
+
+// ----------------------------------------------------------------------------
+// DEBUG (17/09/2026): comparando as miniaturas de depuração com o leitor de QR
+// nativo do Android (que conseguiu ler o mesmo print sem dificuldade), ficou
+// claro que o problema não era resolução/recorte/rotação — o QR aparecia
+// nítido e grande nas tentativas, mas o jsQR (biblioteca JS "pura", sem
+// aceleração/ML) mesmo assim não achava. O Chrome no Android expõe o MESMO
+// leitor nativo do sistema (ML Kit do Google) pra páginas web via
+// `BarcodeDetector` — muito mais tolerante a reflexo/leve desfoque/baixo
+// contraste. Usamos ele como primeira opção; jsQR vira só o plano B pra
+// navegadores sem essa API (ex: Safari/iPhone, que ainda não suporta).
+// ----------------------------------------------------------------------------
+let nativeDetectorPromise;
+async function getNativeBarcodeDetector() {
+  if (nativeDetectorPromise !== undefined) return nativeDetectorPromise;
+  nativeDetectorPromise = (async () => {
+    if (!('BarcodeDetector' in window)) return null;
+    try {
+      const formats = await window.BarcodeDetector.getSupportedFormats();
+      if (!formats.includes('qr_code')) return null;
+      return new window.BarcodeDetector({ formats: ['qr_code'] });
+    } catch (e) {
+      console.warn('[scan] BarcodeDetector nativo indisponível:', e);
+      return null;
+    }
+  })();
+  return nativeDetectorPromise;
+}
+
+async function tryDecodeNative(detector, canvas) {
+  try {
+    const codes = await detector.detect(canvas);
+    return codes && codes.length ? codes[0].rawValue : null;
+  } catch (e) {
+    console.warn('[scan] erro no BarcodeDetector nativo:', e);
+    return null;
+  }
 }
 
 /**
@@ -114,29 +153,35 @@ function tryDecode(imageData) {
  * resolução ORIGINAL da foto, que é onde o QR (normalmente na parte de
  * baixo da nota) aparece com mais nitidez.
  *
+ * NOTA 2 (17/09/2026): depois de confirmar via depuração visual que o QR
+ * aparecia nítido nas tentativas e mesmo assim não era lido, trocamos pra
+ * usar o leitor nativo do navegador (BarcodeDetector/ML Kit) como primeira
+ * opção — bem mais tolerante que o jsQR.
+ *
  * `debug`, se passado, recebe um array com { label, canvas, found } de cada
  * tentativa — usado só pra mostrar uma prévia visual na tela de "lendo a nota".
  */
 async function decodeQrFromImage(img, debug) {
-  await ensureJsQR();
+  const nativeDetector = await getNativeBarcodeDetector();
+  if (!nativeDetector) await ensureJsQR();
   const w = img.width;
   const h = img.height;
-  console.log(`[scan] foto carregada: ${w}x${h}px`);
+  console.log(`[scan] foto carregada: ${w}x${h}px — leitor: ${nativeDetector ? 'nativo (BarcodeDetector)' : 'jsQR'}`);
 
-  function attempt(label, sx, sy, sw, sh, maxDim) {
+  async function attempt(label, sx, sy, sw, sh, maxDim) {
     const { imageData, canvas } = getImageDataAt(img, sx, sy, sw, sh, maxDim);
-    const result = tryDecode(imageData);
-    console.log(`[scan] tentativa "${label}": recorte ${sw}x${sh} → canvas ${canvas.width}x${canvas.height} → ${result ? 'QR ENCONTRADO' : 'nada'}`);
-    if (debug) debug.push({ label, canvas, found: !!result });
-    return result;
+    const found = nativeDetector ? await tryDecodeNative(nativeDetector, canvas) : tryDecodeJsQR(imageData);
+    console.log(`[scan] tentativa "${label}": recorte ${sw}x${sh} → canvas ${canvas.width}x${canvas.height} → ${found ? 'QR ENCONTRADO' : 'nada'}`);
+    if (debug) debug.push({ label, canvas, found: !!found });
+    return found;
   }
 
   // 1) Imagem inteira, em algumas resoluções (da maior pra menor: tentar
   //    manter o máximo de detalhe primeiro custa mais processamento, mas o
   //    scan é uma ação pontual disparada pela pessoa, então vale a pena).
   for (const maxDim of [3000, 2200, 1600]) {
-    const result = attempt(`inteira @${maxDim}`, 0, 0, w, h, maxDim);
-    if (result) return result.data;
+    const found = await attempt(`inteira @${maxDim}`, 0, 0, w, h, maxDim);
+    if (found) return found;
   }
 
   // 2) A nota fiscal é comprida e o QR normalmente fica no terço de baixo —
@@ -148,8 +193,8 @@ async function decodeQrFromImage(img, debug) {
     { label: 'terço de cima', sy: 0, sh: Math.round(h * 0.4) }
   ];
   for (const c of crops) {
-    const result = attempt(c.label, 0, c.sy, w, c.sh, 2400);
-    if (result) return result.data;
+    const found = await attempt(c.label, 0, c.sy, w, c.sh, 2400);
+    if (found) return found;
   }
 
   return null;
