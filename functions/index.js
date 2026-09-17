@@ -686,9 +686,19 @@ function parseBRNumber(str) {
 }
 
 function stripTagsKeepLines(html) {
+  // BUG ENCONTRADO EM PRODUÇÃO (17/09/2026): a versão antiga fazia o replace
+  // de <br>/fechamento de tag ANTES de colapsar espaços, então toda quebra de
+  // linha que já existia no HTML de origem (a maioria dos portais da Sefaz é
+  // bem identada/"pretty printed") virava uma "linha" nossa também —
+  // fragmentando um único campo (ex: "(Código: 6213970 )") em 3-4 linhas
+  // soltas, e confundindo todo o parser de itens depois. Corrige colapsando
+  // TODO espaço em branco (incluindo \n e \t do HTML original) pra um espaço
+  // só, ANTES de inserir nossas próprias quebras de linha (<br> e fechamento
+  // de tags de bloco) — só essas quebras nossas sobrevivem até o split final.
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/\s+/g, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|td|span|h[1-6])>/gi, '$&\n')
     .replace(/<[^>]+>/g, ' ')
@@ -710,16 +720,26 @@ function parseReceiptLines(lines) {
   for (let i = 0; i < lines.length; i++) {
     const qtyMatch = NFCE_QTY_RE.exec(lines[i]);
     if (!qtyMatch) continue;
-    const window = [lines[i], lines[i + 1] || '', lines[i + 2] || ''].join(' ');
+    // Janela maior (5 linhas): com o HTML já "limpo" de verdade (ver
+    // stripTagsKeepLines), cada campo (Qtde./UN/Vl.Unit./"Vl. Total"/valor)
+    // vira sua própria linha — "Vl. Total" e o valor costumam ficar 3-4
+    // linhas depois da linha "Qtde.:", então uma janela de só 2 linhas
+    // perdia o valor total do item.
+    const window = [lines[i], lines[i + 1] || '', lines[i + 2] || '', lines[i + 3] || '', lines[i + 4] || ''].join(' ');
     const unitMatch = NFCE_UNIT_RE.exec(window);
     const unitPriceMatch = NFCE_UNIT_PRICE_RE.exec(window);
     const totalMatch = NFCE_TOTAL_ITEM_RE.exec(window);
     if (!unitPriceMatch && !totalMatch) continue; // não parece ser mesmo uma linha de item
 
+    // BUG ENCONTRADO EM PRODUÇÃO (17/09/2026): o teste antigo só pulava
+    // linhas que COMEÇAVAM com "cod" — mas a linha real é "(Código: 6213970
+    // )" (com parênteses antes), então não batia e o "nome" do item virava
+    // esse texto de código em vez do nome de verdade. Agora pula qualquer
+    // linha que CONTENHA "código", em vez de exigir que comece com isso.
     let name = '';
-    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+    for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
       const candidate = lines[j];
-      if (candidate && candidate.length > 2 && !/^c[oó]d/i.test(candidate)) { name = candidate; break; }
+      if (candidate && candidate.length > 2 && !/c[oó]digo/i.test(candidate)) { name = candidate; break; }
     }
     if (!name) continue;
 
@@ -737,10 +757,30 @@ function parseReceiptLines(lines) {
   return items;
 }
 
+// Todo cupom de NFC-e do Brasil traz esse texto fixo perto do topo — sem
+// excluir explicitamente, ele batia nos filtros genéricos de "parece um
+// nome" e era escolhido no lugar do nome real do estabelecimento.
+const STORE_NAME_BOILERPLATE_RE = /DOCUMENTO\s+AUXILIAR|NOTA\s+FISCAL\s+DE|CONSUMIDOR\s+ELETR[ÔO]NICA/i;
+
 function guessStoreName(lines) {
-  for (let i = 0; i < Math.min(lines.length, 15); i++) {
+  // BUG ENCONTRADO EM PRODUÇÃO (17/09/2026): o nome do mercado estava vindo
+  // como "DOCUMENTO AUXILIAR DA NOTA FISCAL DE..." — esse texto passa nos
+  // filtros genéricos (tem letras, tamanho ok, não é CNPJ/data) só que é um
+  // texto padrão que aparece em TODA nota do Brasil, não o nome da loja.
+  // Correção: como toda nota tem uma linha "CNPJ:" logo depois do nome do
+  // estabelecimento, ancora nela e procura pra trás — muito mais confiável.
+  const cnpjIdx = lines.findIndex((l) => /CNPJ/i.test(l));
+  if (cnpjIdx > 0) {
+    for (let i = cnpjIdx - 1; i >= Math.max(0, cnpjIdx - 4); i--) {
+      const l = lines[i];
+      if (l.length > 2 && l.length < 80 && /[A-Za-zÀ-ú]{3,}/.test(l) && !STORE_NAME_BOILERPLATE_RE.test(l)) return l;
+    }
+  }
+  // Sem CNPJ encontrado (raro) — cai pro heurístico antigo, agora também
+  // excluindo o texto padrão.
+  for (let i = 0; i < Math.min(lines.length, 20); i++) {
     const l = lines[i];
-    if (l.length > 4 && l.length < 60 && /[A-Za-zÀ-ú]{4,}/.test(l) && !/^\d/.test(l) && !/CNPJ|CPF|DATA|EMISS/i.test(l)) return l;
+    if (l.length > 4 && l.length < 60 && /[A-Za-zÀ-ú]{4,}/.test(l) && !/^\d/.test(l) && !/CNPJ|CPF|DATA|EMISS/i.test(l) && !STORE_NAME_BOILERPLATE_RE.test(l)) return l;
   }
   return '';
 }
@@ -755,14 +795,21 @@ function guessDate(lines) {
 }
 
 function guessTotal(lines) {
-  const totalRe = /Valor\s+(a\s+)?[Pp]agar|Valor\s+Total\b/i;
-  for (let i = 0; i < lines.length; i++) {
-    if (totalRe.test(lines[i])) {
-      const m = /([\d.,]+)/.exec(lines[i + 1] || lines[i]);
-      if (m) return parseBRNumber(m[1]);
+  // Prioriza "Valor a pagar" (valor final, já com desconto aplicado) sobre
+  // "Valor Total" (valor bruto, antes do desconto) — antes pegava o
+  // primeiro que aparecesse no texto, que geralmente é o bruto.
+  const payRe = /Valor\s+a\s+pagar/i;
+  const totalRe = /Valor\s+Total\b/i;
+  function findAfter(re) {
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i])) {
+        const m = /([\d.,]+)/.exec(lines[i + 1] || lines[i]);
+        if (m) return parseBRNumber(m[1]);
+      }
     }
+    return null;
   }
-  return null;
+  return findAfter(payRe) ?? findAfter(totalRe);
 }
 
 exports.parseNfce = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
