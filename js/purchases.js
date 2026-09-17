@@ -55,7 +55,27 @@ function ensureJsQR() {
   return jsQRPromise;
 }
 
-function loadImageFile(file) {
+// ----------------------------------------------------------------------------
+// DEBUG (17/09/2026): o QR continuava não sendo lido mesmo depois de tentar
+// várias resoluções/recortes, sem dar pra saber o motivo à distância. Duas
+// suspeitas a descartar:
+//  1. Rotação EXIF: fotos de celular guardam a imagem "deitada" internamente
+//     e uma tag dizendo "gire ao exibir" — <img>/canvas nem sempre respeitam
+//     isso igual em todo navegador, então os recortes (que assumem foto em
+//     pé) podiam estar pegando pedaço errado. createImageBitmap com
+//     imageOrientation:'from-image' resolve isso de forma mais confiável.
+//  2. Não dava pra ver o que o código realmente tentou ler. Agora guardamos
+//     uma miniatura de cada tentativa (com resultado) pra mostrar na tela.
+// window.__lastQrDebug fica disponível no console pra inspecionar depois.
+// ----------------------------------------------------------------------------
+async function loadImageFile(file) {
+  if ('createImageBitmap' in window) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch (e) {
+      console.warn('createImageBitmap falhou, usando <img> como fallback:', e);
+    }
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
@@ -71,7 +91,7 @@ function getImageDataAt(img, sx, sy, sw, sh, maxDim) {
   canvas.height = Math.max(1, Math.round(sh * scale));
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  return { imageData: ctx.getImageData(0, 0, canvas.width, canvas.height), canvas };
 }
 
 function tryDecode(imageData) {
@@ -93,18 +113,29 @@ function tryDecode(imageData) {
  * resoluções maiores, e depois pedaços (metade de baixo, cantos) na
  * resolução ORIGINAL da foto, que é onde o QR (normalmente na parte de
  * baixo da nota) aparece com mais nitidez.
+ *
+ * `debug`, se passado, recebe um array com { label, canvas, found } de cada
+ * tentativa — usado só pra mostrar uma prévia visual na tela de "lendo a nota".
  */
-async function decodeQrFromImage(img) {
+async function decodeQrFromImage(img, debug) {
   await ensureJsQR();
   const w = img.width;
   const h = img.height;
+  console.log(`[scan] foto carregada: ${w}x${h}px`);
+
+  function attempt(label, sx, sy, sw, sh, maxDim) {
+    const { imageData, canvas } = getImageDataAt(img, sx, sy, sw, sh, maxDim);
+    const result = tryDecode(imageData);
+    console.log(`[scan] tentativa "${label}": recorte ${sw}x${sh} → canvas ${canvas.width}x${canvas.height} → ${result ? 'QR ENCONTRADO' : 'nada'}`);
+    if (debug) debug.push({ label, canvas, found: !!result });
+    return result;
+  }
 
   // 1) Imagem inteira, em algumas resoluções (da maior pra menor: tentar
   //    manter o máximo de detalhe primeiro custa mais processamento, mas o
   //    scan é uma ação pontual disparada pela pessoa, então vale a pena).
   for (const maxDim of [3000, 2200, 1600]) {
-    const data = getImageDataAt(img, 0, 0, w, h, maxDim);
-    const result = tryDecode(data);
+    const result = attempt(`inteira @${maxDim}`, 0, 0, w, h, maxDim);
     if (result) return result.data;
   }
 
@@ -112,13 +143,12 @@ async function decodeQrFromImage(img) {
   //    recorta só essa região, em resolução original, pra não perder
   //    definição do QR ao reduzir a foto inteira.
   const crops = [
-    { sy: Math.round(h * 0.6), sh: Math.round(h * 0.4) }, // terço/40% de baixo
-    { sy: Math.round(h * 0.4), sh: Math.round(h * 0.4) }, // metade do meio
-    { sy: 0, sh: Math.round(h * 0.4) }                     // terço de cima (nota "de cabeça pra baixo")
+    { label: 'terço de baixo', sy: Math.round(h * 0.6), sh: Math.round(h * 0.4) },
+    { label: 'metade do meio', sy: Math.round(h * 0.4), sh: Math.round(h * 0.4) },
+    { label: 'terço de cima', sy: 0, sh: Math.round(h * 0.4) }
   ];
   for (const c of crops) {
-    const data = getImageDataAt(img, 0, c.sy, w, c.sh, 2400);
-    const result = tryDecode(data);
+    const result = attempt(c.label, 0, c.sy, w, c.sh, 2400);
     if (result) return result.data;
   }
 
@@ -160,20 +190,74 @@ export function startReceiptScan() {
   input.click();
 }
 
+// ----------------------------------------------------------------------------
+// DEBUG (17/09/2026, temporário): mostra na tela as miniaturas de cada
+// tentativa de leitura de QR, com um selo verde/vermelho, pra dar pra ver (e
+// tirar print) exatamente o que o código enxergou — sem isso é impossível
+// diagnosticar à distância se o problema é a foto, o recorte ou o próprio QR.
+// Pode remover essa função e a chamada dela mais pra frente, quando o scan
+// estiver confiável.
+// ----------------------------------------------------------------------------
+function renderQrDebugPanel(container, attempts) {
+  if (!attempts || !attempts.length) return;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-top:10px; padding-top:10px; border-top:1px solid #ddd;';
+  wrap.innerHTML = '<p class="hint" style="margin-bottom:6px;">Depuração — regiões testadas na foto:</p>';
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px;';
+  attempts.forEach((a) => {
+    const cell = document.createElement('div');
+    cell.style.cssText = `border:2px solid ${a.found ? '#3a6351' : '#b3492f'}; border-radius:6px; padding:4px; max-width:140px;`;
+    const label = document.createElement('div');
+    label.style.cssText = 'font-size:0.7rem; color:#666; margin-bottom:2px;';
+    label.textContent = `${a.label}${a.found ? ' ✅' : ''}`;
+    a.canvas.style.cssText = 'width:100%; height:auto; display:block;';
+    cell.appendChild(label);
+    cell.appendChild(a.canvas);
+    grid.appendChild(cell);
+  });
+  wrap.appendChild(grid);
+  container.appendChild(wrap);
+}
+
 async function handleReceiptPhoto(file) {
   const closeLoading = openModal({
     title: 'Lendo a nota…',
-    bodyHtml: `<p class="hint" id="scanStatus">Procurando o QR code na foto…</p>`
+    bodyHtml: `
+      <p class="hint" id="scanStatus">Procurando o QR code na foto…</p>
+      <div id="scanDebugPanel"></div>
+      <div class="modal-actions" id="scanDebugActions" style="display:none;">
+        <button type="button" class="btn-primary" id="scanDebugContinueBtn">Continuar</button>
+      </div>
+    `
   });
 
   try {
     const img = await loadImageFile(file);
     let result = null;
     let source = 'manual';
+    const debugAttempts = [];
 
     // 1) QR code
     try {
-      const qrText = await decodeQrFromImage(img);
+      const qrText = await decodeQrFromImage(img, debugAttempts);
+
+      // Mostra a prévia de depuração e espera a pessoa conferir antes de seguir
+      // (só enquanto estamos investigando o problema do QR não ser lido).
+      const debugPanel = document.getElementById('scanDebugPanel');
+      if (debugPanel) renderQrDebugPanel(debugPanel, debugAttempts);
+      if (!qrText) {
+        const statusEl = document.getElementById('scanStatus');
+        if (statusEl) statusEl.textContent = 'QR code não encontrado em nenhuma das regiões acima.';
+        const actions = document.getElementById('scanDebugActions');
+        if (actions) {
+          actions.style.display = '';
+          await new Promise((resolve) => {
+            document.getElementById('scanDebugContinueBtn').addEventListener('click', resolve, { once: true });
+          });
+        }
+      }
+
       if (qrText && /^https?:\/\//i.test(qrText) && parseNfceFunctionUrl) {
         const statusEl = document.getElementById('scanStatus');
         if (statusEl) statusEl.textContent = 'QR code encontrado — buscando os itens da nota…';

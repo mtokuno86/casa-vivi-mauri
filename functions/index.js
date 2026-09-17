@@ -699,21 +699,21 @@ function stripTagsKeepLines(html) {
     .filter(Boolean);
 }
 
-const QTY_RE = /Qtde\.?:?\s*([\d.,]+)/i;
-const UNIT_RE = /\bUN:?\s*([A-Za-zÀ-ú]{1,6})\b/i;
-const UNIT_PRICE_RE = /Vl\.?\s*Unit[áa]?r?i?o?\.?:?\s*([\d.,]+)/i;
-const TOTAL_ITEM_RE = /Vl\.?\s*(Total|Item)\.?:?\s*([\d.,]+)/i;
+const NFCE_QTY_RE = /Qtde\.?:?\s*([\d.,]+)/i;
+const NFCE_UNIT_RE = /\bUN:?\s*([A-Za-zÀ-ú]{1,6})\b/i;
+const NFCE_UNIT_PRICE_RE = /Vl\.?\s*Unit[áa]?r?i?o?\.?:?\s*([\d.,]+)/i;
+const NFCE_TOTAL_ITEM_RE = /Vl\.?\s*(Total|Item)\.?:?\s*([\d.,]+)/i;
 
 /** Acha linhas "Qtde./UN/Vl.Unit./Vl.Total" (padrão nacional da NFC-e) e usa a linha anterior como nome do produto. */
 function parseReceiptLines(lines) {
   const items = [];
   for (let i = 0; i < lines.length; i++) {
-    const qtyMatch = QTY_RE.exec(lines[i]);
+    const qtyMatch = NFCE_QTY_RE.exec(lines[i]);
     if (!qtyMatch) continue;
     const window = [lines[i], lines[i + 1] || '', lines[i + 2] || ''].join(' ');
-    const unitMatch = UNIT_RE.exec(window);
-    const unitPriceMatch = UNIT_PRICE_RE.exec(window);
-    const totalMatch = TOTAL_ITEM_RE.exec(window);
+    const unitMatch = NFCE_UNIT_RE.exec(window);
+    const unitPriceMatch = NFCE_UNIT_PRICE_RE.exec(window);
+    const totalMatch = NFCE_TOTAL_ITEM_RE.exec(window);
     if (!unitPriceMatch && !totalMatch) continue; // não parece ser mesmo uma linha de item
 
     let name = '';
