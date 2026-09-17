@@ -1,4 +1,4 @@
-const CACHE_NAME = 'casa-vm-v28';
+const CACHE_NAME = 'casa-vm-v29';
 const APP_SHELL = [
   './',
   './index.html',
@@ -20,6 +20,8 @@ const APP_SHELL = [
   './js/calendar.js',
   './js/photos.js',
   './js/dashboard.js',
+  './js/purchases.js',
+  './js/priceInsights.js',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

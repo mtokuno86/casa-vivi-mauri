@@ -16,6 +16,7 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+const vision = require('@google-cloud/vision');
 
 admin.initializeApp();
 
@@ -650,5 +651,197 @@ exports.disconnectGoogle = onRequest({ cors: true, region: 'southamerica-east1' 
   } catch (e) {
     console.error('Erro ao desconectar do Google:', e);
     res.status(500).json({ error: 'Erro ao desconectar.' });
+  }
+});
+
+// ============================================================================
+// Escaneamento de nota fiscal (NFC-e) — 2 funções que, juntas, permitem
+// registrar uma compra de mercado tirando só uma foto:
+//  1. parseNfce: recebe a URL que estava codificada no QR code da nota (o
+//     app lê o QR da foto no navegador, com a biblioteca jsQR — ver
+//     js/purchases.js) e busca essa URL no site da Sefaz do estado, que
+//     devolve os itens comprados com preço exato — sem depender de "ler" a
+//     imagem, então é bem mais confiável.
+//  2. ocrReceipt: usada só quando o QR não saiu legível na foto — manda a
+//     foto pro Cloud Vision (OCR) e tenta achar os mesmos itens no texto
+//     reconhecido. Menos precisa, por isso sempre pede revisão antes de
+//     salvar.
+//
+// Por que um parser "de texto" em vez de um parser de HTML fixo: cada estado
+// tem seu próprio portal da Sefaz, com HTML bem diferente entre eles — mas o
+// padrão visual "Qtde.: X UN: Y Vl. Unit.: Z Vl. Total W" embaixo do nome de
+// cada produto é praticamente igual em todo o Brasil (é definido pelo layout
+// nacional da NFC-e). Buscar por ESSE padrão de texto, em vez de depender da
+// estrutura exata do HTML de um estado, funciona (ou quase) em mais lugares.
+// Quando não bater perfeitamente, a pessoa revisa/corrige na tela antes de
+// salvar — por isso um resultado parcial já ajuda bastante.
+// ============================================================================
+
+function parseBRNumber(str) {
+  if (str === null || str === undefined) return null;
+  const cleaned = String(str).trim().replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isNaN(n) ? null : n;
+}
+
+function stripTagsKeepLines(html) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|td|span|h[1-6])>/gi, '$&\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+const QTY_RE = /Qtde\.?:?\s*([\d.,]+)/i;
+const UNIT_RE = /\bUN:?\s*([A-Za-zÀ-ú]{1,6})\b/i;
+const UNIT_PRICE_RE = /Vl\.?\s*Unit[áa]?r?i?o?\.?:?\s*([\d.,]+)/i;
+const TOTAL_ITEM_RE = /Vl\.?\s*(Total|Item)\.?:?\s*([\d.,]+)/i;
+
+/** Acha linhas "Qtde./UN/Vl.Unit./Vl.Total" (padrão nacional da NFC-e) e usa a linha anterior como nome do produto. */
+function parseReceiptLines(lines) {
+  const items = [];
+  for (let i = 0; i < lines.length; i++) {
+    const qtyMatch = QTY_RE.exec(lines[i]);
+    if (!qtyMatch) continue;
+    const window = [lines[i], lines[i + 1] || '', lines[i + 2] || ''].join(' ');
+    const unitMatch = UNIT_RE.exec(window);
+    const unitPriceMatch = UNIT_PRICE_RE.exec(window);
+    const totalMatch = TOTAL_ITEM_RE.exec(window);
+    if (!unitPriceMatch && !totalMatch) continue; // não parece ser mesmo uma linha de item
+
+    let name = '';
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const candidate = lines[j];
+      if (candidate && candidate.length > 2 && !/^c[oó]d/i.test(candidate)) { name = candidate; break; }
+    }
+    if (!name) continue;
+
+    const unitPrice = unitPriceMatch ? parseBRNumber(unitPriceMatch[1]) : null;
+    const totalPrice = totalMatch ? parseBRNumber(totalMatch[2]) : null;
+    const qty = parseBRNumber(qtyMatch[1]) || 1;
+    items.push({
+      name: name.replace(/^\d+\s*[-–]\s*/, '').trim(),
+      qty,
+      unit: unitMatch ? unitMatch[1].toLowerCase() : '',
+      unitPrice: unitPrice ?? (totalPrice ? totalPrice / qty : null),
+      totalPrice: totalPrice ?? (unitPrice ? unitPrice * qty : null)
+    });
+  }
+  return items;
+}
+
+function guessStoreName(lines) {
+  for (let i = 0; i < Math.min(lines.length, 15); i++) {
+    const l = lines[i];
+    if (l.length > 4 && l.length < 60 && /[A-Za-zÀ-ú]{4,}/.test(l) && !/^\d/.test(l) && !/CNPJ|CPF|DATA|EMISS/i.test(l)) return l;
+  }
+  return '';
+}
+
+function guessDate(lines) {
+  const dateRe = /(\d{2}\/\d{2}\/\d{4})\s*(\d{2}:\d{2}:\d{2})?/;
+  for (const l of lines) {
+    const m = dateRe.exec(l);
+    if (m) return m[0];
+  }
+  return '';
+}
+
+function guessTotal(lines) {
+  const totalRe = /Valor\s+(a\s+)?[Pp]agar|Valor\s+Total\b/i;
+  for (let i = 0; i < lines.length; i++) {
+    if (totalRe.test(lines[i])) {
+      const m = /([\d.,]+)/.exec(lines[i + 1] || lines[i]);
+      if (m) return parseBRNumber(m[1]);
+    }
+  }
+  return null;
+}
+
+exports.parseNfce = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
+  const url = req.query.url;
+  if (!url || typeof url !== 'string') {
+    res.status(400).json({ error: 'Passe a URL do QR code da nota no parâmetro "url".' });
+    return;
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('protocolo inválido');
+  } catch (e) {
+    res.status(400).json({ error: 'Link do QR code inválido.' });
+    return;
+  }
+  try {
+    const resp = await fetch(parsedUrl.toString(), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CasaVMBot/1.0)' },
+      redirect: 'follow'
+    });
+    if (!resp.ok) {
+      res.status(502).json({ error: `Não foi possível acessar a nota (HTTP ${resp.status}).` });
+      return;
+    }
+    const html = await resp.text();
+    const lines = stripTagsKeepLines(html);
+    const items = parseReceiptLines(lines);
+    res.json({
+      store: guessStoreName(lines),
+      date: guessDate(lines),
+      total: guessTotal(lines),
+      items,
+      sourceUrl: parsedUrl.toString(),
+      warning: items.length ? null : 'Não conseguimos identificar os itens automaticamente nessa nota — confira e preencha manualmente abaixo.'
+    });
+  } catch (e) {
+    console.error('Erro ao ler nota fiscal (NFC-e):', e);
+    res.status(500).json({ error: 'Erro ao processar essa nota. Tente novamente ou cadastre manualmente.' });
+  }
+});
+
+let visionClient = null;
+function getVisionClient() {
+  if (!visionClient) visionClient = new vision.ImageAnnotatorClient();
+  return visionClient;
+}
+
+// Fallback por OCR — usado quando o QR code não saiu legível na foto. Exige
+// que a API "Cloud Vision" esteja ativada no projeto (veja SETUP.md).
+exports.ocrReceipt = onRequest({ cors: true, region: 'southamerica-east1', memory: '512MiB' }, async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Use POST com { imageBase64 } no corpo.' });
+    return;
+  }
+  const imageBase64 = req.body && req.body.imageBase64;
+  if (!imageBase64 || typeof imageBase64 !== 'string') {
+    res.status(400).json({ error: 'Passe a imagem em base64 no campo "imageBase64".' });
+    return;
+  }
+  try {
+    const buffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
+    const [result] = await getVisionClient().textDetection({ image: { content: buffer } });
+    const fullText = (result.fullTextAnnotation && result.fullTextAnnotation.text) || '';
+    if (!fullText) {
+      res.json({ items: [], store: '', date: '', total: null, warning: 'Não conseguimos ler texto nessa foto — tente uma foto mais nítida ou cadastre manualmente.' });
+      return;
+    }
+    const lines = fullText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const items = parseReceiptLines(lines);
+    res.json({
+      store: guessStoreName(lines),
+      date: guessDate(lines),
+      total: guessTotal(lines),
+      items,
+      warning: 'Leitura por foto (menos precisa que o QR code) — confira os itens antes de salvar.'
+    });
+  } catch (e) {
+    console.error('Erro no OCR da nota fiscal:', e);
+    res.status(500).json({ error: 'Erro ao ler a foto da nota. Confira se a API "Cloud Vision" está ativada no Google Cloud Console (veja SETUP.md), ou cadastre manualmente.' });
   }
 });

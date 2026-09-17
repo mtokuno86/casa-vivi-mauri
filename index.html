@@ -123,10 +123,19 @@
     <section id="view-compras" class="view">
       <div class="section-header">
         <h2>Lista de compras</h2>
-        <button id="addShoppingItemBtn" class="btn-primary">+ Item avulso / wishlist</button>
+        <div style="display:flex; gap:8px;">
+          <button id="scanReceiptBtn" class="btn-secondary">📷 Escanear nota</button>
+          <button id="addShoppingItemBtn" class="btn-primary">+ Item avulso / wishlist</button>
+        </div>
       </div>
       <p class="hint">Do cardápio da semana, itens básicos abaixo do mínimo no estoque, e itens avulsos/wishlist.</p>
       <div id="shoppingList" class="shopping-list"></div>
+
+      <div class="section-header" style="margin-top:24px;">
+        <h2>Gastos no mercado</h2>
+      </div>
+      <p class="hint">Escaneie as notas fiscais das compras (botão "📷 Escanear nota" acima) para começar a ver o histórico de preços aqui.</p>
+      <div id="priceInsights"></div>
     </section>
 
     <section id="view-tarefas" class="view">

@@ -62,3 +62,15 @@ export const recipeSearchFunctionUrl = "https://searchrecipes-4zgmuhm3va-rj.a.ru
 export const googleOAuthCallbackUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/googleOAuthCallback";
 export const getGoogleAccessTokenUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/getGoogleAccessToken";
 export const disconnectGoogleUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/disconnectGoogle";
+
+// URL da Cloud Function "parseNfce" (lê a URL do QR code de uma nota fiscal
+// e busca os itens/preços no site da Sefaz). Depois do deploy (veja
+// SETUP.md), fica algo como:
+// "https://southamerica-east1-SEU-PROJETO.cloudfunctions.net/parseNfce"
+// Deixe vazio para desativar a leitura de nota fiscal via QR code.
+export const parseNfceFunctionUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/parseNfce";
+
+// URL da Cloud Function "ocrReceipt" (fallback por foto quando o QR code da
+// nota não sai legível — exige a API "Cloud Vision" ativada, veja
+// SETUP.md). Deixe vazio para desativar o fallback (fica só QR code + manual).
+export const ocrReceiptFunctionUrl = "https://southamerica-east1-casa-a-casa-504119.cloudfunctions.net/ocrReceipt";

@@ -24,6 +24,47 @@ export function findPantryItemByName(name) {
   return pantryStockStore.list.find((i) => normalizeName(i.name) === key) || null;
 }
 
+// ----------------------------------------------------------------------------
+// Casamento aproximado de nome — usado pela leitura de nota fiscal (ver
+// purchases.js): o nome que vem da nota costuma ser abreviado/em caixa alta
+// e cheio de detalhes da marca/tamanho (ex: "ARROZ TIO JOAO T1 5KG"), bem
+// diferente de como a pessoa cadastrou o item no Estoque (ex: "Arroz").
+// Em vez de exigir nome idêntico, compara por PALAVRAS em comum: se todas as
+// palavras do nome do Estoque aparecem dentro do nome da nota (ou vice
+// versa), considera um match. Não é perfeito, mas a tela de revisão sempre
+// deixa a pessoa corrigir antes de salvar.
+// ----------------------------------------------------------------------------
+function wordsOf(name) {
+  return normalizeName(name).split(/[^a-zà-ú0-9]+/).filter((w) => w.length > 2);
+}
+
+function wordOverlapScore(a, b) {
+  const wa = wordsOf(a);
+  const wb = wordsOf(b);
+  if (!wa.length || !wb.length) return 0;
+  const setB = new Set(wb);
+  const shared = wa.filter((w) => setB.has(w)).length;
+  return shared / Math.min(wa.length, wb.length);
+}
+
+/** Melhor item do Estoque (ingrediente OU casa) pro nome dado, ou null se nada bater bem o bastante. Retorna { item, kind, score }. */
+export function findBestStockMatch(name) {
+  const candidates = [
+    ...pantryStockStore.list.map((item) => ({ item, kind: 'pantry' })),
+    ...houseStockStore.list.map((item) => ({ item, kind: 'house' }))
+  ];
+  let best = null;
+  for (const c of candidates) {
+    const score = wordOverlapScore(name, c.item.name);
+    if (score >= 0.6 && (!best || score > best.score)) best = { item: c.item, kind: c.kind, score };
+  }
+  return best;
+}
+
+export function stockOf(kind) {
+  return kind === 'house' ? houseStockStore : pantryStockStore;
+}
+
 export function getLowStockItems(store) {
   return store.list.filter(isLowStock);
 }
@@ -41,6 +82,8 @@ export function openItemForm(store, existing) {
         <input type="text" name="unit" placeholder="Ex: kg, un, pacote" value="${existing?.unit || ''}">
         <label>Mínimo (abaixo disso, entra na lista de compras)</label>
         <input type="number" step="any" name="minQty" min="0" value="${existing?.minQty ?? 0}">
+        <label>Categoria (opcional — usada para sugerir trocas mais baratas em "Compras")</label>
+        <input type="text" name="categoria" placeholder="Ex: arroz, leite, sabonete" value="${existing?.categoria ? existing.categoria.replace(/"/g, '&quot;') : ''}">
         <div class="modal-actions">
           ${existing ? '<button type="button" id="deleteStockBtn" class="btn-secondary" style="color:#b3492f;">Excluir</button>' : ''}
           <button type="button" class="btn-secondary" id="cancelStockBtn">Cancelar</button>
@@ -66,7 +109,8 @@ export function openItemForm(store, existing) {
           name: fd.get('name').trim(),
           qty: Number(fd.get('qty')) || 0,
           unit: fd.get('unit').trim(),
-          minQty: Number(fd.get('minQty')) || 0
+          minQty: Number(fd.get('minQty')) || 0,
+          categoria: (fd.get('categoria') || '').trim()
         };
         if (existing) await store.set(existing.id, data);
         else await store.add(data);
@@ -87,7 +131,7 @@ function itemRowHtml(item) {
     <div class="stock-row ${low ? 'low' : ''}" data-id="${item.id}">
       <div class="stock-info">
         <div class="stock-name">${item.name} ${low ? '<span class="low-tag">em falta</span>' : ''}</div>
-        <div class="stock-qty">${item.qty ?? 0} ${item.unit || ''} ${item.minQty ? '· mín. ' + item.minQty : ''}</div>
+        <div class="stock-qty">${item.qty ?? 0} ${item.unit || ''} ${item.minQty ? '· mín. ' + item.minQty : ''} ${item.categoria ? '· ' + item.categoria : ''}</div>
       </div>
       <div class="stock-actions">
         <button type="button" class="stepper minus">−</button>

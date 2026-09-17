@@ -16,7 +16,7 @@ import { initDb, getMode } from './db.js';
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, mas sempre no horário de São Paulo (UTC-3, sem horário de
 // verão desde 2019) — não no horário UTC/local de quem estiver editando.
-const BUILD_STAMP = '2026-09-14 11:50';
+const BUILD_STAMP = '2026-09-17 12:00';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');
@@ -157,7 +157,8 @@ async function main() {
   // 2) Só agora carregamos os módulos que criam stores.
   const [
     authMod, membersMod, recipesMod, mealPlannerMod, stockMod,
-    shoppingListMod, tasksMod, calendarMod, photosMod, dashboardMod
+    shoppingListMod, tasksMod, calendarMod, photosMod, dashboardMod,
+    purchasesMod, priceInsightsMod
   ] = await Promise.all([
     import('./auth.js'),
     import('./members.js'),
@@ -168,7 +169,9 @@ async function main() {
     import('./tasks.js'),
     import('./calendar.js'),
     import('./photos.js'),
-    import('./dashboard.js')
+    import('./dashboard.js'),
+    import('./purchases.js'),
+    import('./priceInsights.js')
   ]);
 
   initSyncStatusIndicator();
@@ -197,6 +200,8 @@ async function main() {
   tasksMod.initTasks();
   calendarMod.initCalendar();
   dashboardMod.initDashboard();
+  purchasesMod.initPurchases();
+  priceInsightsMod.initPriceInsights();
 
   initTabs((tab) => {
     if (tab === 'dashboard') dashboardMod.refreshDashboard();

@@ -307,6 +307,40 @@ reconexão automática por sessão, só não dura "para sempre".)*
 
 ---
 
+## 7.8. Escanear nota fiscal (histórico de preços, opcional)
+
+Liga o botão "📷 Escanear nota" na aba **Compras**: tira uma foto da nota
+fiscal do mercado, o app lê o QR code (dados oficiais da Sefaz, mais
+confiável) ou, se não conseguir, tenta ler o texto da foto (OCR) — sempre com
+uma tela de revisão antes de salvar. Alimenta a seção "Gastos no mercado"
+(itens recorrentes, preços médios, sugestões de troca, "conferir preço
+agora").
+
+1. As duas novas Cloud Functions (`parseNfce` e `ocrReceipt`) já vêm prontas
+   em `functions/index.js` — não precisa escrever nada, só publicar:
+   ```bash
+   cd functions
+   npm install
+   cd ..
+   firebase deploy --only functions
+   ```
+2. Para o **OCR** funcionar (fallback quando o QR code não sai legível na
+   foto): **console.cloud.google.com** → **APIs e serviços → Biblioteca** →
+   busque e ative a **Cloud Vision API**. Se pular esse passo, o app ainda
+   funciona normalmente com QR code + preenchimento manual — só o OCR fica
+   indisponível (a função `ocrReceipt` responde com um erro nesse caso).
+3. Cole as URLs das duas funções em `js/config.js`, em
+   `parseNfceFunctionUrl` e `ocrReceiptFunctionUrl` (mesmo formato das
+   outras — o terminal mostra as URLs depois do `firebase deploy`).
+4. Adicione as duas coleções novas (`purchases` e `purchaseItems`) às regras
+   do Firestore (junto com as outras listadas no passo 7.6):
+   ```
+   match /purchases/{id}     { allow read, write: if true; }
+   match /purchaseItems/{id} { allow read, write: if true; }
+   ```
+
+---
+
 ## 8. Testando
 
 - Abra o app no celular, toque em **"Conectar Google"** no topo, faça login (vai
@@ -319,6 +353,9 @@ reconexão automática por sessão, só não dura "para sempre".)*
   "em falta" e aparecendo na Lista de compras.
 - Abra no tablet e confirme que os mesmos dados aparecem (sincronização via
   Firestore).
+- Na aba **Compras**, toque em "📷 Escanear nota" e tire uma foto de uma nota
+  fiscal de mercado — confira a tela de revisão antes de salvar, e depois veja
+  o item aparecer em "Gastos no mercado" logo abaixo.
 
 ---
 
