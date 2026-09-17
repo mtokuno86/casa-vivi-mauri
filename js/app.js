@@ -16,7 +16,7 @@ import { initDb, getMode } from './db.js';
 // no topo do app para confirmar se o aparelho já pegou a versão mais nova.
 // Formato livre, mas sempre no horário de São Paulo (UTC-3, sem horário de
 // verão desde 2019) — não no horário UTC/local de quem estiver editando.
-const BUILD_STAMP = '2026-09-17 12:00';
+const BUILD_STAMP = '2026-09-17 14:30';
 
 function initTabs(onTabChange) {
   const buttons = document.querySelectorAll('.tab-btn');

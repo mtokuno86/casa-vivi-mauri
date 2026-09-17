@@ -64,20 +64,65 @@ function loadImageFile(file) {
   });
 }
 
-/** Tenta achar e decodificar um QR code na foto. Retorna a URL/texto decodificado, ou null se não achar. */
+function getImageDataAt(img, sx, sy, sw, sh, maxDim) {
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, maxDim / Math.max(sw, sh));
+  canvas.width = Math.max(1, Math.round(sw * scale));
+  canvas.height = Math.max(1, Math.round(sh * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
+function tryDecode(imageData) {
+  // "attemptBoth" cobre o caso (raro, mas acontece em fotos com flash/reflexo)
+  // de o QR sair com as cores invertidas na captura.
+  return window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+}
+
+/**
+ * Tenta achar e decodificar um QR code na foto. Retorna a URL/texto decodificado, ou null se não achar.
+ *
+ * NOTA (17/09/2026): a primeira versão só testava a foto inteira reduzida
+ * pra no máximo 1600px de lado maior. Isso funcionava mal em fotos de nota
+ * fiscal inteira (a nota é comprida e o QR code é só um quadradinho no
+ * rodapé) — depois de reduzir a foto toda, o QR ficava pequeno demais e sem
+ * definição suficiente pra decodificar, mesmo a câmera nativa do celular
+ * (que foca e testa continuamente em vídeo, não numa única foto estática)
+ * lendo sem problema. Agora tentamos várias "passadas": a imagem inteira em
+ * resoluções maiores, e depois pedaços (metade de baixo, cantos) na
+ * resolução ORIGINAL da foto, que é onde o QR (normalmente na parte de
+ * baixo da nota) aparece com mais nitidez.
+ */
 async function decodeQrFromImage(img) {
   await ensureJsQR();
-  const canvas = document.createElement('canvas');
-  // Reduz um pouco fotos gigantes (celular moderno tira fotos enormes) —
-  // acelera o processamento sem perder resolução suficiente pra ler o QR.
-  const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const result = window.jsQR(imageData.data, imageData.width, imageData.height);
-  return result ? result.data : null;
+  const w = img.width;
+  const h = img.height;
+
+  // 1) Imagem inteira, em algumas resoluções (da maior pra menor: tentar
+  //    manter o máximo de detalhe primeiro custa mais processamento, mas o
+  //    scan é uma ação pontual disparada pela pessoa, então vale a pena).
+  for (const maxDim of [3000, 2200, 1600]) {
+    const data = getImageDataAt(img, 0, 0, w, h, maxDim);
+    const result = tryDecode(data);
+    if (result) return result.data;
+  }
+
+  // 2) A nota fiscal é comprida e o QR normalmente fica no terço de baixo —
+  //    recorta só essa região, em resolução original, pra não perder
+  //    definição do QR ao reduzir a foto inteira.
+  const crops = [
+    { sy: Math.round(h * 0.6), sh: Math.round(h * 0.4) }, // terço/40% de baixo
+    { sy: Math.round(h * 0.4), sh: Math.round(h * 0.4) }, // metade do meio
+    { sy: 0, sh: Math.round(h * 0.4) }                     // terço de cima (nota "de cabeça pra baixo")
+  ];
+  for (const c of crops) {
+    const data = getImageDataAt(img, 0, c.sy, w, c.sh, 2400);
+    const result = tryDecode(data);
+    if (result) return result.data;
+  }
+
+  return null;
 }
 
 function fileToBase64(file) {
