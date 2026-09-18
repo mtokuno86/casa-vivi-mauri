@@ -345,25 +345,34 @@ function parseNfceDateToStr(raw) {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : todayStr();
 }
 
+// NOTA (18/09/2026): antes era uma linha de <table> com colunas fixas em
+// pixels — no celular ficava tão espremido que só dava pra ver a primeira
+// letra do nome do item. Trocado por um "card" por item, empilhando os
+// campos em vez de forçar tudo numa linha só; ainda funciona igual no
+// desktop, só que com mais respiro.
 function itemRowHtml(item, i) {
   const match = item.name ? findBestStockMatch(item.name) : null;
   const matchNote = match
     ? `<option value="${match.kind}:${match.item.id}" selected>↳ ${escapeHtml(match.item.name)} (${match.kind === 'house' ? 'casa' : 'ingrediente'})</option>`
     : '';
   return `
-    <tr class="receipt-item-row" data-i="${i}">
-      <td><input type="text" class="ri-name" value="${escapeHtml(item.name || '')}" placeholder="Nome do item"></td>
-      <td><input type="number" step="any" min="0" class="ri-qty" value="${item.qty ?? 1}" style="width:64px;"></td>
-      <td><input type="text" class="ri-unit" value="${escapeHtml(item.unit || '')}" style="width:56px;" placeholder="un"></td>
-      <td><input type="number" step="any" min="0" class="ri-price" value="${item.unitPrice ?? ''}" style="width:80px;" placeholder="0,00"></td>
-      <td>
+    <div class="receipt-item-row" data-i="${i}">
+      <div class="ri-top">
+        <input type="text" class="ri-name" value="${escapeHtml(item.name || '')}" placeholder="Nome do item">
+        <button type="button" class="remove-ri" title="Remover item">✕</button>
+      </div>
+      <div class="ri-fields">
+        <label>Qtd<input type="number" step="any" min="0" class="ri-qty" value="${item.qty ?? 1}"></label>
+        <label>Un.<input type="text" class="ri-unit" value="${escapeHtml(item.unit || '')}" placeholder="un"></label>
+        <label>Preço unit. (R$)<input type="number" step="any" min="0" class="ri-price" value="${item.unitPrice ?? ''}" placeholder="0,00"></label>
+      </div>
+      <label class="ri-match-label">Vincular ao estoque
         <select class="ri-match">
           <option value="">— criar/ignorar —</option>
           ${matchNote}
         </select>
-      </td>
-      <td><button type="button" class="remove-ri" style="background:none;border:none;color:#b3492f;">✕</button></td>
-    </tr>
+      </label>
+    </div>
   `;
 }
 
@@ -381,17 +390,8 @@ function openReviewModal(result, source) {
         <input type="text" name="store" value="${escapeHtml(result.store || '')}" placeholder="Ex: Supermercado ABC">
         <label>Data da compra</label>
         <input type="date" name="date" value="${parseNfceDateToStr(result.date)}">
-        <div style="overflow-x:auto; margin-top:10px;">
-          <table class="receipt-items-table" style="width:100%; border-collapse:collapse;">
-            <thead>
-              <tr style="text-align:left; font-size:0.8rem; color:#777;">
-                <th>Item</th><th>Qtd</th><th>Un.</th><th>Preço unit. (R$)</th><th>Vincular ao estoque</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="receiptItemsBody">
-              ${items.map(itemRowHtml).join('')}
-            </tbody>
-          </table>
+        <div id="receiptItemsBody" class="receipt-items-list" style="margin-top:10px;">
+          ${items.map(itemRowHtml).join('')}
         </div>
         <button type="button" id="addReceiptItemBtn" class="btn-secondary" style="margin-top:8px;">+ Item</button>
         <label style="margin-top:12px; display:flex; align-items:center; gap:6px;">
@@ -412,9 +412,9 @@ function openReviewModal(result, source) {
       body.querySelectorAll('.receipt-item-row').forEach(bindRow);
 
       modalEl.querySelector('#addReceiptItemBtn').addEventListener('click', () => {
-        const div = document.createElement('tbody');
-        div.innerHTML = itemRowHtml({ name: '', qty: 1, unit: '', unitPrice: null }, body.children.length);
-        const row = div.firstElementChild;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = itemRowHtml({ name: '', qty: 1, unit: '', unitPrice: null }, body.children.length);
+        const row = wrap.firstElementChild;
         body.appendChild(row);
         bindRow(row);
       });
@@ -500,6 +500,49 @@ function openReviewModal(result, source) {
       });
     }
   });
+}
+
+// ----------------------------------------------------------------------------
+// Desfazer a última importação — pedido depois de usar o scanner na prática:
+// às vezes só depois de aceitar é que a pessoa percebe que um item deveria
+// ter sido vinculado a um item já existente do Estoque (em vez de criar um
+// novo), ou que algo saiu errado. Isso remove a compra e seus itens do
+// histórico de preços, e desfaz o ajuste de quantidade feito no Estoque na
+// hora — sem precisar editar tudo manualmente.
+// ----------------------------------------------------------------------------
+export function getLastPurchase() {
+  const sorted = [...purchasesStore.list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  return sorted[0] || null;
+}
+
+export async function undoLastPurchase() {
+  const last = getLastPurchase();
+  if (!last) { window.alert('Nenhuma compra registrada ainda.'); return; }
+
+  const items = purchaseItemsStore.list.filter((i) => i.purchaseId === last.id);
+  const resumo = `${last.store || 'Compra sem nome'} — ${last.date || ''} (${items.length} ${items.length === 1 ? 'item' : 'itens'})`;
+  const ok = window.confirm(
+    `Desfazer a última compra importada?\n\n${resumo}\n\n` +
+    `Isso remove a compra e os itens do histórico de preços, e desfaz o ajuste ` +
+    `de quantidade feito no Estoque (subtrai o que foi somado). Itens do ` +
+    `Estoque criados automaticamente na hora não são apagados — só a ` +
+    `quantidade volta atrás.`
+  );
+  if (!ok) return;
+
+  for (const item of items) {
+    if (item.stockItemId && item.stockKind) {
+      const s = stockOf(item.stockKind);
+      const stockItem = s.getById(item.stockItemId);
+      if (stockItem) {
+        const nextQty = Math.max(0, (stockItem.qty || 0) - (item.qty || 0));
+        await s.set(item.stockItemId, { qty: nextQty });
+      }
+    }
+    await purchaseItemsStore.remove(item.id);
+  }
+  await purchasesStore.remove(last.id);
+  window.alert('Última compra desfeita.');
 }
 
 export function initPurchases() {

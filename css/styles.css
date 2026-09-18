@@ -350,13 +350,46 @@ ul.today-tasks li, ul.today-events li, ul.event-list li {
 }
 .stock-row.low { border-left: 4px solid var(--danger); }
 
-/* Modal de revisão da nota fiscal tem uma tabela — precisa de mais largura
-   que os modais de formulário simples. :has() já tem suporte amplo nos
-   navegadores usados aqui (Chrome desktop/Android); sem suporte, o modal
-   só fica um pouco mais estreito (a tabela ainda rola horizontalmente). */
+/* Modal de revisão da nota fiscal — precisa de mais largura que os modais de
+   formulário simples. :has() já tem suporte amplo nos navegadores usados
+   aqui (Chrome desktop/Android); sem suporte, o modal só fica um pouco mais
+   estreito (ainda funciona, só com menos respiro no desktop). */
 .modal:has(#receiptItemsBody) { max-width: 720px; }
-.receipt-items-table th, .receipt-items-table td { padding: 4px 6px; }
-.receipt-items-table input, .receipt-items-table select { padding: 6px 8px; font-size: 0.85rem; }
+
+/* Cada item da nota vira um "card" empilhado (nome, depois qtd/un/preço lado
+   a lado, depois o vínculo com o estoque) em vez de uma linha de tabela —
+   no celular uma tabela de 6 colunas ficava tão espremida que só dava pra
+   ver a primeira letra do nome de cada item. */
+.receipt-items-list { display: flex; flex-direction: column; gap: 10px; }
+.receipt-item-row {
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafafa;
+}
+.receipt-item-row .ri-top { display: flex; align-items: center; gap: 8px; }
+.receipt-item-row .ri-top .ri-name { flex: 1; font-weight: 600; }
+.receipt-item-row .remove-ri {
+  background: none; border: none; color: #b3492f; font-size: 1.1rem;
+  padding: 4px 8px; flex-shrink: 0;
+}
+.receipt-item-row .ri-fields {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+}
+.receipt-item-row .ri-fields label {
+  display: flex; flex-direction: column; font-size: 0.72rem; color: #777;
+  flex: 1; min-width: 72px;
+}
+.receipt-item-row .ri-fields label:first-child { flex: 0 0 64px; }
+.receipt-item-row .ri-fields input {
+  margin-top: 2px; padding: 6px 8px; font-size: 0.9rem; width: 100%;
+}
+.receipt-item-row .ri-match-label {
+  display: block; font-size: 0.72rem; color: #777; margin-top: 8px;
+}
+.receipt-item-row .ri-match-label select {
+  display: block; width: 100%; margin-top: 2px; padding: 6px 8px; font-size: 0.85rem;
+}
 .price-history-table th, .price-history-table td { padding: 6px 8px; border-bottom: 1px solid #eee; }
 .stock-info { flex: 1; }
 .stock-name { font-weight: 600; }

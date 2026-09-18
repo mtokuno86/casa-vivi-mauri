@@ -10,7 +10,7 @@
 // Tudo calculado em memória a partir do que já está sincronizado (sem
 // nenhuma Cloud Function nova) — funciona offline também.
 // ============================================================================
-import { purchaseItemsStore } from './purchases.js';
+import { purchaseItemsStore, purchasesStore, getLastPurchase, undoLastPurchase } from './purchases.js';
 
 function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
@@ -193,12 +193,37 @@ function bindPriceCheckTool(container, groups) {
   });
 }
 
+// ----------------------------------------------------------------------------
+// Card de "desfazer última importação": fica sempre visível (não só logo
+// depois de escanear), porque a pessoa às vezes só percebe um erro de
+// vínculo com o Estoque depois de já ter saído da tela de revisão.
+// ----------------------------------------------------------------------------
+function renderUndoLastPurchaseCard() {
+  const last = getLastPurchase();
+  if (!last) return '';
+  return `
+    <div class="card" style="margin-top:14px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+      <div>
+        <div style="font-size:0.75rem; color:#999;">Última nota importada</div>
+        <strong>${escapeHtml(last.store || 'Sem nome')}</strong> — ${fmtDate(last.date)}
+      </div>
+      <button type="button" id="undoLastPurchaseBtn" class="btn-secondary" style="color:#b3492f;">↩️ Desfazer última compra</button>
+    </div>
+  `;
+}
+
+function bindUndoLastPurchaseCard(container) {
+  const btn = container.querySelector('#undoLastPurchaseBtn');
+  if (btn) btn.addEventListener('click', undoLastPurchase);
+}
+
 export function renderPriceInsights() {
   const container = document.getElementById('priceInsights');
   if (!container) return;
   const groups = groupItems();
   container.innerHTML = `
-    <div class="card">
+    ${renderUndoLastPurchaseCard()}
+    <div class="card" style="margin-top:14px;">
       <h3>📊 Histórico de preços</h3>
       ${renderRecurringTable(groups)}
     </div>
@@ -206,8 +231,10 @@ export function renderPriceInsights() {
     ${renderSwapSuggestions(groups)}
   `;
   bindPriceCheckTool(container, groups);
+  bindUndoLastPurchaseCard(container);
 }
 
 export function initPriceInsights() {
   purchaseItemsStore.subscribe(renderPriceInsights);
+  purchasesStore.subscribe(renderPriceInsights);
 }

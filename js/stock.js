@@ -34,8 +34,19 @@ export function findPantryItemByName(name) {
 // versa), considera um match. Não é perfeito, mas a tela de revisão sempre
 // deixa a pessoa corrigir antes de salvar.
 // ----------------------------------------------------------------------------
+// BUG ENCONTRADO EM PRODUÇÃO (18/09/2026): a nota fiscal quase sempre vem
+// SEM acentos (ex: "MOIDA", "ACUCAR", "CAFE"), enquanto o nome cadastrado no
+// Estoque normalmente tem acento (ex: "Carne moída", "Açúcar", "Café") — como
+// a comparação de palavras era por string exata, "moida" nunca batia com
+// "moída" e a sugestão de vínculo com o estoque quase nunca aparecia. Tira
+// os acentos das duas pontas antes de comparar (só pra fins de comparação —
+// os nomes exibidos continuam com acento normalmente).
+function stripAccents(str) {
+  return str.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 function wordsOf(name) {
-  return normalizeName(name).split(/[^a-zà-ú0-9]+/).filter((w) => w.length > 2);
+  return stripAccents(normalizeName(name)).split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 }
 
 function wordOverlapScore(a, b) {
@@ -56,7 +67,11 @@ export function findBestStockMatch(name) {
   let best = null;
   for (const c of candidates) {
     const score = wordOverlapScore(name, c.item.name);
-    if (score >= 0.6 && (!best || score > best.score)) best = { item: c.item, kind: c.kind, score };
+    // 0.5 em vez de 0.6: nomes de nota fiscal costumam ser bem mais
+    // específicos/abreviados que o nome cadastrado no Estoque (ex: "MOIDA
+    // PATINHO 1" vs "Carne moída" — só 1 de 2 palavras do lado do Estoque
+    // bate), então exigir 60% de sobreposição deixava passar poucos matches.
+    if (score >= 0.5 && (!best || score > best.score)) best = { item: c.item, kind: c.kind, score };
   }
   return best;
 }
