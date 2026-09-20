@@ -350,11 +350,31 @@ function parseNfceDateToStr(raw) {
 // letra do nome do item. Trocado por um "card" por item, empilhando os
 // campos em vez de forçar tudo numa linha só; ainda funciona igual no
 // desktop, só que com mais respiro.
+//
+// NOTA (20/09/2026): quando a sugestão automática (findBestStockMatch) não
+// achava nada, o dropdown só tinha a opção "criar/ignorar" — sem jeito de
+// vincular manualmente a um item que já existe no Estoque mas cujo nome é
+// diferente demais da nota pra bater no match automático. Agora o dropdown
+// sempre lista TODOS os itens do Estoque (agrupados por ingrediente/casa),
+// com a sugestão automática (se houver) já pré-selecionada.
+function stockOptionsHtml(selectedKind, selectedId) {
+  function optionsFor(list, kind) {
+    return [...list]
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+      .map((it) => `<option value="${kind}:${it.id}" ${kind === selectedKind && it.id === selectedId ? 'selected' : ''}>${escapeHtml(it.name)}</option>`)
+      .join('');
+  }
+  const pantryOpts = optionsFor(pantryStockStore.list, 'pantry');
+  const houseOpts = optionsFor(houseStockStore.list, 'house');
+  return `
+    <option value="">— criar/ignorar —</option>
+    ${pantryOpts ? `<optgroup label="Ingredientes">${pantryOpts}</optgroup>` : ''}
+    ${houseOpts ? `<optgroup label="Itens da casa">${houseOpts}</optgroup>` : ''}
+  `;
+}
+
 function itemRowHtml(item, i) {
   const match = item.name ? findBestStockMatch(item.name) : null;
-  const matchNote = match
-    ? `<option value="${match.kind}:${match.item.id}" selected>↳ ${escapeHtml(match.item.name)} (${match.kind === 'house' ? 'casa' : 'ingrediente'})</option>`
-    : '';
   return `
     <div class="receipt-item-row" data-i="${i}">
       <div class="ri-top">
@@ -368,8 +388,7 @@ function itemRowHtml(item, i) {
       </div>
       <label class="ri-match-label">Vincular ao estoque
         <select class="ri-match">
-          <option value="">— criar/ignorar —</option>
-          ${matchNote}
+          ${stockOptionsHtml(match?.kind || null, match?.item?.id || null)}
         </select>
       </label>
     </div>
